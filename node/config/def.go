@@ -178,7 +178,7 @@ func DefaultStorageMiner() *StorageMiner {
 			MaxDealStartDelay:               Duration(time.Hour * 24 * 14),
 			ExpectedSealDuration:            Duration(time.Hour * 24),
 			PublishMsgPeriod:                Duration(time.Hour),
-			MaxDealsPerPublishMsg:           8,
+			MaxDealsPerPublishMsg:           0, //8,
 			MaxProviderCollateralMultiplier: 2,
 
 			SimultaneousTransfersForStorage:          DefaultSimultaneousTransfers,
