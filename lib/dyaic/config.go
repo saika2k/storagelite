@@ -1,4 +1,4 @@
-package config
+package dyaic
 
 const (
 	defaultRepoDir = "~/.dyaic"

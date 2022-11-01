@@ -1,8 +1,7 @@
-package diff
+package dyaic
 
 import (
 	"bufio"
-	"dyaic/config"
 	"fmt"
 	"io"
 	"log"
@@ -131,7 +130,7 @@ func SaveDiff(old, new string) {
 		log.Panic(err)
 	}
 	script := shortestEditScript(src, dst)
-	f, err := os.Create(config.RepoLocation + "/diff")
+	f, err := os.Create(RepoLocation + "/diff")
 	defer f.Close()
 	if err != nil {
 		log.Panic(err)

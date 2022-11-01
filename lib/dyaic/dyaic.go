@@ -1,7 +1,6 @@
-package diff
+package dyaic
 
 import (
-	"dyaic/config"
 	"io/ioutil"
 	"log"
 )
@@ -142,7 +141,7 @@ func SaveDyaicDiff(old, new string) {
 			srcIndex += 1
 		}
 	}
-	err = ioutil.WriteFile(config.RepoLocation+"/diff", tmp, 0644)
+	err = ioutil.WriteFile(RepoLocation+"/diff", tmp, 0644)
 	if err != nil {
 		log.Panic(err)
 	}

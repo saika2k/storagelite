@@ -1,10 +1,6 @@
-package cli
+package dyaic
 
 import (
-	"dyaic/config"
-	"dyaic/diff"
-	"dyaic/monitor"
-	"dyaic/utils"
 	"fmt"
 	"io/fs"
 	"log"
@@ -15,7 +11,7 @@ import (
 
 func (cli *CLI) commit(loc string, bs bool) {
 	if loc == "" {
-		loc = config.TempLocation
+		loc = TempLocation
 	}
 	locLen := len(loc)
 	err := filepath.Walk(loc, func(path string, info fs.FileInfo, err error) error {
@@ -23,10 +19,10 @@ func (cli *CLI) commit(loc string, bs bool) {
 			return err
 		}
 		rLoc := path[locLen:]
-		repoLoc := config.RepoLocation + rLoc
+		repoLoc := RepoLocation + rLoc
 		repoInfo, err := os.Stat(repoLoc)
 
-		if utils.Exist(err) {
+		if Exist(err) {
 			if info.IsDir() {
 				return nil
 			}
@@ -34,11 +30,11 @@ func (cli *CLI) commit(loc string, bs bool) {
 				fmt.Println("File has been modified:", rLoc)
 				patchName := repoLoc + ".patch"
 				if bs {
-					diff.GenBSPatch(repoLoc, path, patchName)
-					diff.BSPatch(repoLoc, repoLoc, patchName, true)
+					GenBSPatch(repoLoc, path, patchName)
+					BSPatch(repoLoc, repoLoc, patchName, true)
 				} else {
-					diff.GenPatch(repoLoc, path, patchName)
-					diff.Patch(repoLoc, repoLoc, patchName, true)
+					GenPatch(repoLoc, path, patchName)
+					Patch(repoLoc, repoLoc, patchName, true)
 				}
 				fmt.Println("Updated.")
 				// TODO: send changes tx
@@ -53,7 +49,7 @@ func (cli *CLI) commit(loc string, bs bool) {
 				}
 			} else {
 				fmt.Println("New file:", rLoc)
-				utils.Copy(path, repoLoc)
+				Copy(path, repoLoc)
 				fmt.Println("Copied.")
 				// TODO: send file tx
 				// TODO: sync file with other nodes
@@ -69,16 +65,16 @@ func (cli *CLI) commit(loc string, bs bool) {
 func (cli *CLI) hashFile(loc string) {
 	hashBegin := time.Now()
 	if loc == "" {
-		loc = config.TempLocation
+		loc = TempLocation
 	}
-	fmt.Println(utils.Md5File(loc))
+	fmt.Println(Md5File(loc))
 	hashEnd := time.Now()
 	fmt.Println(hashEnd.Sub(hashBegin))
 }
 
 func (cli *CLI) patch(loc string, bs bool) {
 	if loc == "" {
-		loc = config.TempLocation
+		loc = TempLocation
 	}
 	locLen := len(loc)
 	err := filepath.Walk(loc, func(path string, info fs.FileInfo, err error) error {
@@ -86,20 +82,20 @@ func (cli *CLI) patch(loc string, bs bool) {
 			return err
 		}
 		rLoc := path[locLen:]
-		repoLoc := config.RepoLocation + rLoc
+		repoLoc := RepoLocation + rLoc
 		//repoInfo, err := os.Stat(repoLoc)
 
-		if utils.Exist(err) {
+		if Exist(err) {
 			if info.IsDir() {
 				return nil
 			}
-			if !utils.SameFile(path, repoLoc) { // file has been modified, sync needed
+			if !SameFile(path, repoLoc) { // file has been modified, sync needed
 				fmt.Println("File has been modified:", rLoc, ", file size: ", info.Size())
 				patchName := repoLoc + ".patch"
 				if bs {
-					diff.GenBSPatch(repoLoc, path, patchName)
+					GenBSPatch(repoLoc, path, patchName)
 				} else {
-					diff.GenPatch(repoLoc, path, patchName)
+					GenPatch(repoLoc, path, patchName)
 				}
 				fmt.Println("Generated patch file ", repoLoc, ".patch")
 			}
@@ -119,7 +115,7 @@ func (cli *CLI) patch(loc string, bs bool) {
 
 func (cli *CLI) printDiff(loc string) {
 	if loc == "" {
-		loc = config.TempLocation
+		loc = TempLocation
 	}
 	locLen := len(loc)
 	err := filepath.Walk(loc, func(path string, info fs.FileInfo, err error) error {
@@ -127,20 +123,20 @@ func (cli *CLI) printDiff(loc string) {
 			return err
 		}
 		rLoc := path[locLen:]
-		repoLoc := config.RepoLocation + rLoc
+		repoLoc := RepoLocation + rLoc
 		repoInfo, err := os.Stat(repoLoc)
 
-		if utils.Exist(err) {
+		if Exist(err) {
 			if info.IsDir() {
 				return nil
 			}
 			if info.ModTime().After(repoInfo.ModTime()) { // file has been modified, sync needed
-				chs := diff.GenerateChanges(repoLoc, path)
+				chs := GenerateChanges(repoLoc, path)
 				if len(chs.Item) == 0 {
 					return nil
 				}
 				fmt.Println("File has been modified:", rLoc)
-				diff.ShowDiff(repoLoc, path)
+				ShowDiff(repoLoc, path)
 			}
 		} else { // new file (or folder), creation needed
 			if info.IsDir() {
@@ -158,7 +154,7 @@ func (cli *CLI) printDiff(loc string) {
 
 func (cli *CLI) saveDiff(loc string) {
 	if loc == "" {
-		loc = config.TempLocation
+		loc = TempLocation
 	}
 	locLen := len(loc)
 	err := filepath.Walk(loc, func(path string, info fs.FileInfo, err error) error {
@@ -166,20 +162,20 @@ func (cli *CLI) saveDiff(loc string) {
 			return err
 		}
 		rLoc := path[locLen:]
-		repoLoc := config.RepoLocation + rLoc
+		repoLoc := RepoLocation + rLoc
 		repoInfo, err := os.Stat(repoLoc)
 
-		if utils.Exist(err) {
+		if Exist(err) {
 			if info.IsDir() {
 				return nil
 			}
 			if info.ModTime().After(repoInfo.ModTime()) { // file has been modified, sync needed
-				chs := diff.GenerateChanges(repoLoc, path)
+				chs := GenerateChanges(repoLoc, path)
 				if len(chs.Item) == 0 {
 					return nil
 				}
 				fmt.Println("File has been modified:", rLoc)
-				diff.SaveDyaicDiff(repoLoc, path)
+				SaveDyaicDiff(repoLoc, path)
 			}
 		} else { // new file (or folder), creation needed
 			if info.IsDir() {
@@ -197,7 +193,7 @@ func (cli *CLI) saveDiff(loc string) {
 
 func (cli *CLI) printFolder(loc string) {
 	if loc == "" {
-		loc = config.TempLocation
+		loc = TempLocation
 	}
 	err := filepath.Walk(loc, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
@@ -212,7 +208,7 @@ func (cli *CLI) printFolder(loc string) {
 }
 
 func (cli *CLI) watch(loc string) {
-	watcher := monitor.Watch(loc)
+	watcher := Watch(loc)
 	defer watcher.Close()
 	select {}
 }

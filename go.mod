@@ -57,6 +57,7 @@ require (
 	github.com/filecoin-project/specs-actors/v7 v7.0.1
 	github.com/filecoin-project/specs-actors/v8 v8.0.1
 	github.com/filecoin-project/test-vectors/schema v0.0.5
+	github.com/fsnotify/fsnotify v1.5.4
 	github.com/gbrlsnchs/jwt/v3 v3.0.1
 	github.com/gdamore/tcell/v2 v2.2.0
 	github.com/go-kit/kit v0.12.0
@@ -195,7 +196,6 @@ require (
 	github.com/filecoin-project/storetheindex v0.4.17 // indirect
 	github.com/flynn/noise v1.0.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
-	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/gdamore/encoding v1.0.0 // indirect
 	github.com/go-kit/log v0.2.0 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect

@@ -89,6 +89,7 @@ var clientCmd = &cli.Command{
 		WithCategory("data", clientDropCmd),
 		WithCategory("data", clientLocalCmd),
 		WithCategory("data", clientStat),
+		WithCategory("data", clientDiffCmd),
 		WithCategory("retrieval", clientFindCmd),
 		WithCategory("retrieval", clientQueryRetrievalAskCmd),
 		WithCategory("retrieval", clientRetrieveCmd),
@@ -2066,6 +2067,20 @@ var clientStat = &cli.Command{
 		fmt.Printf("Payload Size: %v\n", ds.PayloadSize)
 
 		return nil
+	},
+}
+
+var clientDiffCmd = &cli.Command{
+	Name:  "diff",
+	Usage: "Generate increment between files",
+	Flags: []cli.Flag{
+		&cli.BoolFlag{
+			Name:  "bs",
+			Usage: "use bsdiff rather than diff",
+		},
+	},
+	Action: func(cctx *cli.Context) error {
+
 	},
 }
 
