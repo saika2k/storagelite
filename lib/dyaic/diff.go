@@ -18,7 +18,7 @@ func GenPatch(old, new, patchName string) {
 	//if err != nil {
 	//	log.Panic(err)
 	//}
-	err = ioutil.WriteFile(patchName+".patch", patch, 0644)
+	err = ioutil.WriteFile(patchName, patch, 0644)
 	if err != nil {
 		log.Panic(err)
 	}
