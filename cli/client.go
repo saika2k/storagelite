@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/filecoin-project/lotus/lib/dyaic"
 	"io"
 	"math"
 	"math/rand"
@@ -89,7 +90,11 @@ var clientCmd = &cli.Command{
 		WithCategory("data", clientDropCmd),
 		WithCategory("data", clientLocalCmd),
 		WithCategory("data", clientStat),
+		WithCategory("data", clientCommitCmd),
 		WithCategory("data", clientDiffCmd),
+		WithCategory("data", clientPatchCmd),
+		WithCategory("data", clientPrintCmd),
+		WithCategory("data", clientWatchCmd),
 		WithCategory("retrieval", clientFindCmd),
 		WithCategory("retrieval", clientQueryRetrievalAskCmd),
 		WithCategory("retrieval", clientRetrieveCmd),
@@ -2070,17 +2075,86 @@ var clientStat = &cli.Command{
 	},
 }
 
+var clientCommitCmd = &cli.Command{
+	Name:  "commit",
+	Usage: "Commit changes in LOCATION",
+	Flags: []cli.Flag{
+		&cli.BoolFlag{
+			Name:  "bs",
+			Usage: "use bsdiff rather than diff",
+		},
+		&cli.StringFlag{
+			Name:  "dir",
+			Usage: "directory to be committed",
+		},
+	},
+	Action: func(cctx *cli.Context) error {
+		dyaic.DyaicCommit(cctx.String("dir"), cctx.Bool("bs"))
+		return nil
+	},
+}
+
 var clientDiffCmd = &cli.Command{
 	Name:  "diff",
+	Usage: "Show changes in LOCATION",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "dir",
+			Usage: "directory where changes should be shown",
+		},
+	},
+	Action: func(cctx *cli.Context) error {
+		dyaic.DyaicPrintDiff(cctx.String("dir"))
+		return nil
+	},
+}
+
+var clientPatchCmd = &cli.Command{
+	Name:  "patch",
 	Usage: "Generate increment between files",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
 			Name:  "bs",
 			Usage: "use bsdiff rather than diff",
 		},
+		&cli.StringFlag{
+			Name:  "dir",
+			Usage: "directory of files we calc patch for",
+		},
 	},
 	Action: func(cctx *cli.Context) error {
+		dyaic.DyaicPatch(cctx.String("dir"), cctx.Bool("bs"))
+		return nil
+	},
+}
 
+var clientPrintCmd = &cli.Command{
+	Name:  "print",
+	Usage: "Show files in LOCATION",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "dir",
+			Usage: "directory of files we calc patch for",
+		},
+	},
+	Action: func(cctx *cli.Context) error {
+		dyaic.DyaicPrintFolder(cctx.String("dir"))
+		return nil
+	},
+}
+
+var clientWatchCmd = &cli.Command{
+	Name:  "watch",
+	Usage: "Start watching LOCATION",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:  "dir",
+			Usage: "directory to be watched",
+		},
+	},
+	Action: func(cctx *cli.Context) error {
+		dyaic.DyaicWatch(cctx.String("dir"))
+		return nil
 	},
 }
 

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func (cli *CLI) commit(loc string, bs bool) {
+func DyaicCommit(loc string, bs bool) {
 	if loc == "" {
 		loc = TempLocation
 	}
@@ -62,7 +62,7 @@ func (cli *CLI) commit(loc string, bs bool) {
 	}
 }
 
-func (cli *CLI) hashFile(loc string) {
+func hashFile(loc string) {
 	hashBegin := time.Now()
 	if loc == "" {
 		loc = TempLocation
@@ -72,7 +72,7 @@ func (cli *CLI) hashFile(loc string) {
 	fmt.Println(hashEnd.Sub(hashBegin))
 }
 
-func (cli *CLI) patch(loc string, bs bool) {
+func DyaicPatch(loc string, bs bool) {
 	if loc == "" {
 		loc = TempLocation
 	}
@@ -113,7 +113,7 @@ func (cli *CLI) patch(loc string, bs bool) {
 	}
 }
 
-func (cli *CLI) printDiff(loc string) {
+func DyaicPrintDiff(loc string) {
 	if loc == "" {
 		loc = TempLocation
 	}
@@ -152,7 +152,7 @@ func (cli *CLI) printDiff(loc string) {
 	}
 }
 
-func (cli *CLI) saveDiff(loc string) {
+func saveDiff(loc string) {
 	if loc == "" {
 		loc = TempLocation
 	}
@@ -191,7 +191,7 @@ func (cli *CLI) saveDiff(loc string) {
 	}
 }
 
-func (cli *CLI) printFolder(loc string) {
+func DyaicPrintFolder(loc string) {
 	if loc == "" {
 		loc = TempLocation
 	}
@@ -207,7 +207,7 @@ func (cli *CLI) printFolder(loc string) {
 	}
 }
 
-func (cli *CLI) watch(loc string) {
+func DyaicWatch(loc string) {
 	watcher := Watch(loc)
 	defer watcher.Close()
 	select {}
