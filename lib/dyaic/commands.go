@@ -72,6 +72,20 @@ func hashFile(loc string) {
 	fmt.Println(hashEnd.Sub(hashBegin))
 }
 
+func DyaicGitwalker() {
+	homedir, err := os.UserHomeDir()
+	if err != nil {
+		log.Panic(err)
+	}
+	gitwalkerDir := homedir + "/.gitwalker/"
+	for d := 1; ; d++ {
+		newDir := gitwalkerDir + fmt.Sprintf("%04d", d)
+		oldDir := gitwalkerDir + fmt.Sprintf("%04d", d+1)
+		fmt.Printf("Start Patching %04d~%04d\n", d+1, d)
+		GenPatchForDirectory(oldDir, newDir)
+	}
+}
+
 func DyaicPatch(loc string, bs bool) {
 	if loc == "" {
 		loc = TempLocation

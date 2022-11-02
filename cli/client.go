@@ -92,6 +92,7 @@ var clientCmd = &cli.Command{
 		WithCategory("data", clientStat),
 		WithCategory("data", clientCommitCmd),
 		WithCategory("data", clientDiffCmd),
+		WithCategory("data", clientGitwalkerCmd),
 		WithCategory("data", clientPatchCmd),
 		WithCategory("data", clientPrintCmd),
 		WithCategory("data", clientWatchCmd),
@@ -2105,6 +2106,16 @@ var clientDiffCmd = &cli.Command{
 	},
 	Action: func(cctx *cli.Context) error {
 		dyaic.DyaicPrintDiff(cctx.String("dir"))
+		return nil
+	},
+}
+
+var clientGitwalkerCmd = &cli.Command{
+	Name:  "gitwalker",
+	Usage: "Execute dyaic in gitwalker generated repos",
+	Flags: []cli.Flag{},
+	Action: func(cctx *cli.Context) error {
+		dyaic.DyaicGitwalker()
 		return nil
 	},
 }
