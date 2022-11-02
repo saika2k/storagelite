@@ -1,21 +1,4 @@
----
-title: "Local network"
-description: "Running a Filecoin network locally can be extremely useful for developers wanting to build and test their applications. This page provides guidance on different methods to run a Filecoin network locally."
-lead: "Running a Filecoin network locally can be extremely useful for developers wanting to build and test their applications. This page provides guidance on different methods to run a Filecoin network locally."
-draft: false
-menu:
-    lotus:
-        parent: "lotus-developers"
-        identifier: "developers-networks-local-network"
-weight: 305
-toc: true
-aliases:
-    - /docs/developers/developer-network
-    - /docs/developers/local-network/
-    - /developers/local-network/
----
-
-You can spin up a local network (local-net) using the regular Lotus binaries. This method will launch Lotus using 2 KiB sectors, allowing systems with fewer resources to run a local-net. This solution runs comfortably on a computer with 2 CPU cores and 4 GB RAM.
+You can spin up a local network (local-net) using the regular Lotus binaries. This method will launch Lotus using 8 MiB sectors, allowing systems with fewer resources to run a local-net. This solution runs comfortably on a computer with 2 CPU cores and 4 GB RAM.
 
 This process requires you to use multiple terminal windows, so you might find a terminal multiplexer like [Tmux](https://github.com/tmux/tmux) helpful. However, you can easily complete this tutorial by just having several terminal windows open. The screenshots in this guide use Tmux.
 
@@ -165,24 +148,13 @@ Local-nets use slightly different binaries to those used in the Filecoin mainnet
 2. Clone Lotus repo:
 
     ```shell
-    git clone https://github.com/filecoin-project/lotus lotus-local-net
-    cd lotus-local-net
+    git clone https://github.com/FileDAG/lotus
+    cd lotus
     ```
 
     The `filecoin-project/lotus` repository is the same one that you would use to join the Filecoin mainnet. The `git clone` command puts the Lotus repository into the `lotus-local-net` folder to keep this guide organized.
 
-3. Checkout to the latest branch:
-
-   ```shell
-   git checkout releases
-   # 'releases' always checks out the latest stable release
-   # if you need a specific release use 
-   git checkout <tag_or_release>
-   # For example:
-   # git checkout v1.17.0 # tag for a release
-   ```
-
-4. Remove any existing repositories.
+3. Remove any existing repositories.
 
     <!-- TODO: test if this section is necessary. -->
 
@@ -190,23 +162,16 @@ Local-nets use slightly different binaries to those used in the Filecoin mainnet
     rm -rf ~/.genesis-sectors
     ```
 
-5. Build the `2k` binary for Lotus:
+4. Build the `debug` binary for Lotus:
 
     ```shell
-    make 2k
+    make debug
     ```
 
-    ```plaintext
-    git submodule update --init --recursive
-    Submodule 'extern/filecoin-ffi' (https://github.com/filecoin-project/filecoin-ffi.git) registered for path 'extern/filecoin-ffi'
-    ...
-    go build  -ldflags="-X=github.com/filecoin-project/lotus/build.CurrentCommit=+git.8d5be1c01" -tags=2k -o lotus-gateway ./cmd/lotus-gateway
-    ```
-
-6. Grab the 2048 byte parameters:
+5. Grab the 8MiB parameters:
 
     ```shell
-    ./lotus fetch-params 2048
+    ./lotus fetch-params 8MiB
     ```
 
     This will output something like:
@@ -217,10 +182,10 @@ Local-nets use slightly different binaries to those used in the Filecoin mainnet
     c261/paramfetch.go:162  parameter and key-fetching complete
     ```
 
-7. Pre-seal some sectors for the genesis block:
+6. Pre-seal some sectors for the genesis block:
 
     ```shell
-    ./lotus-seed pre-seal --sector-size 2KiB --num-sectors 2
+    ./lotus-seed pre-seal --sector-size 8MiB --num-sectors 2
     ```
 
     This will output something like:
@@ -231,7 +196,7 @@ Local-nets use slightly different binaries to those used in the Filecoin mainnet
     2021-02-23T10:59:36.937-0500    INFO    preseal seed/seed.go:232        Writing preseal manifest to /home/user/.genesis-sectors/pre-seal-t01000.json
     ```
 
-8. Create the genesis block:
+7. Create the genesis block:
 
     ```shell
     ./lotus-seed genesis new localnet.json
@@ -239,7 +204,7 @@ Local-nets use slightly different binaries to those used in the Filecoin mainnet
 
     This command does not output anything on success.
 
-9. Create a default address and give it some funds:
+8. Create a default address and give it some funds:
 
     ```shell
     ./lotus-seed genesis add-miner localnet.json ~/.genesis-sectors/pre-seal-t01000.json
@@ -289,7 +254,7 @@ Now that you've got everything setup, you can start the `lotus` and `lotus-miner
 4. Set up the genesis miner. This process can take a few minutes:
 
     ```shell
-    ./lotus-miner init --genesis-miner --actor=t01000 --sector-size=2KiB --pre-sealed-sectors=~/.genesis-sectors --pre-sealed-metadata=~/.genesis-sectors/pre-seal-t01000.json --nosync
+    ./lotus-miner init --genesis-miner --actor=t01000 --sector-size=8MiB --pre-sealed-sectors=~/.genesis-sectors --pre-sealed-metadata=~/.genesis-sectors/pre-seal-t01000.json --nosync
     ```
 
     This process may take a few minutes. When complete, the terminal window will display:
@@ -334,4 +299,44 @@ To get the multiaddress of a node, run
 or
 ```shell
 ./lotus-miner net listen
+```
+
+## Be a storage provider
+
+### Creating wallets for the storage provider
+
+```shell
+# A new BLS address to use as owner address:
+./lotus wallet new bls
+f3...
+
+# A new BLS address to use as worker address:
+./lotus wallet new bls
+f3...
+```
+
+Next make sure to send some funds to the worker address so that the storage provider setup can be completed.
+
+### Initialization
+
+```shell
+./lotus-miner init --owner=<address>  --worker=<address> --no-local-storage --sector-size=<2KiB or 8MiB or 32GiB or 64GiB>
+```
+
+### Running the storage provider
+
+```shell
+./lotus-miner run
+```
+
+### Custom location for storing
+
+```shell
+./lotus-miner storage attach --init --store <PATH_FOR_LONG_TERM_STORAGE>
+```
+
+### Custom location for sealing
+
+```shell
+./lotus-miner storage attach --init --seal <PATH_FOR_SEALING_STORAGE>
 ```
