@@ -7,10 +7,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"go.opencensus.io/trace"
 	"golang.org/x/xerrors"
@@ -22,6 +24,7 @@ import (
 	"github.com/filecoin-project/go-state-types/proof"
 
 	"github.com/filecoin-project/lotus/api"
+	lapi "github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/api/v1api"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/actors/builtin"
@@ -33,7 +36,21 @@ import (
 	"github.com/filecoin-project/lotus/journal"
 )
 
+type rel struct {
+	ver     int
+	aggr    address.Address
+	pieceID string
+}
+
+type target struct {
+	ver_sum   int
+	cur_sum   int
+	cur_proof [32][]byte
+}
+
 var log = logging.Logger("miner")
+var relation map[string]rel = make(map[string]rel)
+var aggr_tag map[string]target = make(map[string]target)
 
 // Journal event types.
 const (
@@ -551,6 +568,16 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 		return nil, err
 	}
 
+	for _, msg := range msgs {
+		log.Infof("message selected:type:%v, value: %v\n", msg.Message.Method, msg.Message.Value)
+		if msg.Message.Method == 0 && msg.Message.To == m.address {
+			err := m.HandleMessageType_0(ctx, msg)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	tPending := build.Clock.Now()
 
 	// TODO: winning post proof
@@ -566,7 +593,8 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 	for i, header := range base.TipSet.Blocks() {
 		parentMiners[i] = header.Miner
 	}
-	log.Infow("mined new block", "cid", minedBlock.Cid(), "height", int64(minedBlock.Header.Height), "miner", minedBlock.Header.Miner, "parents", parentMiners, "parentTipset", base.TipSet.Key().String(), "took", dur)
+	messagecontained := len(minedBlock.BlsMessages) + len(minedBlock.SecpkMessages)
+	log.Infow("mined new block", "cid", minedBlock.Cid(), "height", int64(minedBlock.Header.Height), "miner", minedBlock.Header.Miner, "parents", parentMiners, "parentTipset", base.TipSet.Key().String(), "took", dur, "containmsgs", messagecontained, "selected message", len(msgs))
 	if dur > time.Second*time.Duration(build.BlockDelaySecs) {
 		log.Warnw("CAUTION: block production took longer than the block delay. Your computer may not be fast enough to keep up",
 			"tPowercheck ", tPowercheck.Sub(tStart),
@@ -624,4 +652,282 @@ func (m *Miner) createBlock(base *MiningBase, addr address.Address, ticket *type
 		Timestamp:        uts,
 		WinningPoStProof: wpostProof,
 	})
+}
+
+func (m *Miner) HandleMessageType_0(ctx context.Context, msg *types.SignedMessage) error {
+	if msg.Message.Value.Int.Int64() <= 32 {
+		//this case is the increment register message, we just support the file version under the 32 as a simple PC
+		//can only successfully generate SNARK proof under this case
+		//we only handle the message send to us and if we get the other node's message we resend it
+		//we will save the relation between the received file and the original file
+		//also, if the file is a original file, we will also consider it a aggregate target and save this message
+		if msg.Message.To != m.address {
+			maxFee := types.MustParseFIL("0.05")
+			m.api.MpoolPushMessage(ctx, &msg.Message, &lapi.MessageSendSpec{MaxFee: big.Int(maxFee)})
+		} else {
+			file_version := msg.Message.Value.Int.Int64()
+			log.Info("get the increment file version: ", file_version)
+			param := msg.Message.Params
+			var lengt int32
+			pointer := 0
+			len_B := param[pointer : pointer+4]
+			dec_buffer1 := bytes.NewBuffer(len_B)
+			binary.Read(dec_buffer1, binary.BigEndian, &lengt)
+
+			pointer = pointer + 4
+			dec_addr_B := param[pointer : pointer+int(lengt)]
+			dec_addr, _ := address.NewFromBytes(dec_addr_B)
+			log.Info("decode aggregator: ", dec_addr)
+
+			pointer = pointer + int(lengt)
+			len_B = param[pointer : pointer+4]
+			dec_buffer2 := bytes.NewBuffer(len_B)
+			binary.Read(dec_buffer2, binary.BigEndian, &lengt)
+
+			pointer = pointer + 4
+			dec_deal_B := param[pointer : pointer+int(lengt)]
+			log.Info("decode itself commP: ", string(dec_deal_B))
+
+			pointer = pointer + int(lengt)
+			len_B = param[pointer : pointer+4]
+			dec_buffer3 := bytes.NewBuffer(len_B)
+			binary.Read(dec_buffer3, binary.BigEndian, &lengt)
+
+			pointer = pointer + 4
+			dec_ori_file_B := param[pointer : pointer+int(lengt)]
+			log.Info("decode original file commP: ", string(dec_ori_file_B))
+
+			pieceCID := string(dec_deal_B)
+			message := &rel{ver: int(file_version), aggr: dec_addr, pieceID: string(dec_ori_file_B)}
+			relation[pieceCID] = *message
+
+			if file_version == 0 {
+				pieceCID := string(dec_deal_B)
+				message := &target{ver_sum: 1, cur_sum: 0}
+				aggr_tag[pieceCID] = *message
+				log.Info("test the change of aggregate message: ver_sum: ", message.ver_sum, " cur_sum: ", message.cur_sum, " proof size: ", len(message.cur_proof[0]))
+			}
+		}
+		//save this informations into a map: Map[increment_commP]->(version, aggregator. original_file_commP)
+	} else if msg.Message.Value.Int.Int64() >= 500 {
+		//register message: if a storage provider can generate a porep proof, it means that this is an
+		//honest provider and can join the aggregate process
+		//we only handle the message send to us and if we get the other node's message we resend it
+		//
+		if msg.Message.To != m.address {
+			maxFee := types.MustParseFIL("0.05")
+			m.api.MpoolPushMessage(ctx, &msg.Message, &lapi.MessageSendSpec{MaxFee: big.Int(maxFee)})
+		} else {
+			param := msg.Message.Params
+			var lengt int32
+			pointer := 0
+			len_B1 := param[pointer : pointer+4]
+			dec_buffer1 := bytes.NewBuffer(len_B1)
+			binary.Read(dec_buffer1, binary.BigEndian, &lengt)
+
+			pointer = pointer + 4
+			dec_proof := param[pointer : pointer+int(lengt)]
+			//dec_addr, _ := address.NewFromBytes(dec_addr_B)
+			log.Info("decode porep proof: ", dec_proof)
+
+			pointer = pointer + int(lengt)
+			len_B2 := param[pointer : pointer+4]
+			dec_buffer2 := bytes.NewBuffer(len_B2)
+			binary.Read(dec_buffer2, binary.BigEndian, &lengt)
+
+			pointer = pointer + 4
+			dec_commP_B := param[pointer : pointer+int(lengt)]
+			commP, _ := cid.Cast(dec_commP_B)
+			log.Info("decode commP itself: ", commP.String()) //use this to check whether this is an increment or not.
+
+			message, result := relation[commP.String()]
+			if result {
+				if message.aggr != m.address {
+					var para []byte
+
+					para = append(para, len_B1...)
+					para = append(para, dec_proof...)
+					ori_file := []byte(message.pieceID)
+					len_ori_file := len(ori_file)
+					buffer1 := bytes.NewBuffer([]byte{})
+					binary.Write(buffer1, binary.BigEndian, int32(len_ori_file))
+					len_pieceCID := buffer1.Bytes()
+					para = append(para, len_pieceCID...)
+					para = append(para, ori_file...)
+
+					msg := &types.Message{
+						From:   m.address,
+						To:     message.aggr,
+						Method: 0,
+						Params: para,
+						Value:  types.NewInt(uint64(500 + message.ver)),
+					}
+					maxFee := types.MustParseFIL("0.05")
+					m.api.MpoolPushMessage(ctx, msg, &lapi.MessageSendSpec{MaxFee: big.Int(maxFee)})
+
+				} else {
+					log.Info(commP.String(), " I got you!")
+					aggr_msg, result2 := aggr_tag[message.pieceID]
+					if !result2 {
+						log.Debug("this could not happen when handle porep register message")
+					}
+					pos := int64(0)
+					if msg.Message.Value.Int.Int64() > 500 {
+						pos = msg.Message.Value.Int.Int64() - 500
+					} else {
+						pos = int64(message.ver)
+					}
+					temp := aggr_msg.cur_proof
+					append_proof := dec_proof[:32]
+					temp[pos] = append(temp[pos], append_proof...)
+					new_ver_sum := 0
+					if pos+1 > int64(aggr_msg.ver_sum) {
+						new_ver_sum = int(pos + 1)
+					} else {
+						new_ver_sum = aggr_msg.ver_sum
+					}
+					new_cur_sum := aggr_msg.cur_sum + 1
+					new_msg := &target{ver_sum: new_ver_sum, cur_sum: new_cur_sum, cur_proof: temp}
+					aggr_tag[message.pieceID] = *new_msg
+
+					aggr_msg, result2 = aggr_tag[message.pieceID]
+					if !result2 {
+						log.Debug("this could not happen when handle porep register message")
+					}
+					log.Info("test the change of aggregate message: ver_sum: ", aggr_msg.ver_sum, " cur_sum: ", aggr_msg.cur_sum, " proof size: ", len(aggr_msg.cur_proof[0]))
+					if aggr_msg.cur_sum == aggr_msg.ver_sum {
+						//save the collected message and clear the data
+						filename := "agger_data_ver" + strconv.Itoa(aggr_msg.ver_sum)
+						file, _ := os.Create(filename)
+						for i := 0; i < aggr_msg.ver_sum; i++ {
+							position := strconv.Itoa(i) + " "
+							file.WriteString(position)
+							for j := 0; j < 4; j++ {
+								B_int := aggr_msg.cur_proof[i][8*j : 8*j+8]
+								data := binary.LittleEndian.Uint64(B_int)
+								str_data := strconv.Itoa(int(data))
+								file.WriteString(str_data)
+							}
+							file.WriteString("\n")
+						}
+						temp_agge_msg := &target{ver_sum: aggr_msg.ver_sum, cur_sum: 0}
+						aggr_tag[message.pieceID] = *temp_agge_msg
+					}
+					//save
+				}
+			} else { //no way to happen
+				log.Debug("not find the nessage in the storage when deal with the register message")
+			}
+		}
+	} else if msg.Message.Value.Int.Int64() >= 233 && msg.Message.Value.Int.Int64() < 500 {
+		if msg.Message.To != m.address {
+			maxFee := types.MustParseFIL("0.05")
+			m.api.MpoolPushMessage(ctx, &msg.Message, &lapi.MessageSendSpec{MaxFee: big.Int(maxFee)})
+		} else {
+			param := msg.Message.Params
+			var lengt int32
+			pointer := 0
+			len_B1 := param[pointer : pointer+4]
+			dec_buffer1 := bytes.NewBuffer(len_B1)
+			binary.Read(dec_buffer1, binary.BigEndian, &lengt)
+
+			pointer = pointer + 4
+			dec_proof := param[pointer : pointer+int(lengt)]
+			//dec_addr, _ := address.NewFromBytes(dec_addr_B)
+			log.Info("decode PoSt proof: ", dec_proof)
+
+			pointer = pointer + int(lengt)
+			len_B2 := param[pointer : pointer+4]
+			dec_buffer2 := bytes.NewBuffer(len_B2)
+			binary.Read(dec_buffer2, binary.BigEndian, &lengt)
+
+			pointer = pointer + 4
+			dec_commP_B := param[pointer : pointer+int(lengt)]
+			commP, _ := cid.Cast(dec_commP_B)
+			log.Info("decode piece commP in sector: ", commP.String())
+
+			message, result := relation[commP.String()]
+			if result {
+				if message.aggr != m.address {
+					var para []byte
+
+					para = append(para, len_B1...)
+					para = append(para, dec_proof...)
+					ori_file := []byte(message.pieceID)
+					len_ori_file := len(ori_file)
+					buffer1 := bytes.NewBuffer([]byte{})
+					binary.Write(buffer1, binary.BigEndian, int32(len_ori_file))
+					len_pieceCID := buffer1.Bytes()
+					para = append(para, len_pieceCID...)
+					para = append(para, ori_file...)
+
+					msg := &types.Message{
+						From:   m.address,
+						To:     message.aggr,
+						Method: 0,
+						Params: para,
+						Value:  types.NewInt(uint64(233 + message.ver)),
+					}
+					maxFee := types.MustParseFIL("0.05")
+					m.api.MpoolPushMessage(ctx, msg, &lapi.MessageSendSpec{MaxFee: big.Int(maxFee)})
+				} else {
+					log.Info(commP.String(), " I got you!")
+					aggr_msg, result2 := aggr_tag[message.pieceID]
+					if !result2 {
+						log.Debug("this could not happen when handle porep register message")
+					}
+					pos := int64(0)
+					if msg.Message.Value.Int.Int64() > 233 {
+						pos = msg.Message.Value.Int.Int64() - 233
+					} else {
+						pos = int64(message.ver)
+					}
+					temp := aggr_msg.cur_proof
+					append_proof := dec_proof[:32]
+					temp[pos] = append(temp[pos], append_proof...)
+					new_ver_sum := 0
+					if pos+1 > int64(aggr_msg.ver_sum) {
+						new_ver_sum = int(pos + 1)
+					} else {
+						new_ver_sum = aggr_msg.ver_sum
+					}
+					new_cur_sum := aggr_msg.cur_sum + 1
+					new_msg := &target{ver_sum: new_ver_sum, cur_sum: new_cur_sum, cur_proof: temp}
+					aggr_tag[message.pieceID] = *new_msg
+
+					aggr_msg, result2 = aggr_tag[message.pieceID]
+					if !result2 {
+						log.Debug("this could not happen when handle porep register message")
+					}
+					log.Info("test the change of aggregate message: ver_sum: ", aggr_msg.ver_sum, " cur_sum: ", aggr_msg.cur_sum, " proof size: ", len(aggr_msg.cur_proof[0]))
+					if aggr_msg.cur_sum == aggr_msg.ver_sum {
+						//go zk-snark proof and send aggregate message
+						filename := "agger_data_ver" + strconv.Itoa(aggr_msg.ver_sum)
+						file, _ := os.Create(filename)
+						for i := 0; i < aggr_msg.ver_sum; i++ {
+							position := strconv.Itoa(i) + " "
+							file.WriteString(position)
+							for j := 0; j < 4; j++ {
+								B_int := aggr_msg.cur_proof[i][8*j : 8*j+8]
+								data := binary.LittleEndian.Uint64(B_int)
+								str_data := strconv.Itoa(int(data))
+								file.WriteString(str_data)
+							}
+							file.WriteString("\n")
+						}
+						temp_agge_msg := &target{ver_sum: aggr_msg.ver_sum, cur_sum: 0}
+						aggr_tag[message.pieceID] = *temp_agge_msg
+					}
+					t := time.Now()
+					file, _ := os.Create("aggr_get_" + t.String())
+					defer file.Close()
+					file.WriteString("aggr get, timestrap: " + t.String() + "\n" + "pieceCID: " + string(dec_commP_B))
+					//save
+				}
+			} else { //no way to happen
+				log.Debug("not find the nessage in the storage when deal with the register message")
+			}
+		}
+	}
+	return nil
 }

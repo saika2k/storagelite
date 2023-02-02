@@ -11,7 +11,8 @@ import (
 	"github.com/filecoin-project/go-commp-utils/zerocomm"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/crypto"
-	prooftypes "github.com/filecoin-project/go-state-types/proof"
+
+	//prooftypes "github.com/filecoin-project/go-state-types/proof"
 
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/chain/actors/policy"
@@ -102,19 +103,23 @@ func checkPieces(ctx context.Context, maddr address.Address, sn abi.SectorNumber
 // checkPrecommit checks that data commitment generated in the sealing process
 //
 //	matches pieces, and that the seal ticket isn't expired
+
+//Changed by JiaHao Zhang cancel the commD check as in storagelite, we don't use the same method to generate CID
+//The check in the origin filecoin is meaningless.
 func checkPrecommit(ctx context.Context, maddr address.Address, si SectorInfo, tsk types.TipSetKey, height abi.ChainEpoch, api SealingAPI) (err error) {
 	if err := checkPieces(ctx, maddr, si.SectorNumber, si.Pieces, api, false); err != nil {
 		return err
 	}
 
-	commD, err := api.StateComputeDataCID(ctx, maddr, si.SectorType, si.dealIDs(), tsk)
+	//Don't check it anymore!!!
+	/*commD, err := api.StateComputeDataCID(ctx, maddr, si.SectorType, si.dealIDs(), tsk)
 	if err != nil {
 		return &ErrApi{xerrors.Errorf("calling StateComputeDataCommitment: %w", err)}
 	}
 
 	if si.CommD == nil || !commD.Equals(*si.CommD) {
 		return &ErrBadCommD{xerrors.Errorf("on chain CommD differs from sector: %s != %s", commD, si.CommD)}
-	}
+	}*/
 
 	pci, err := api.StateSectorPreCommitInfo(ctx, maddr, si.SectorNumber, tsk)
 	if err != nil {
@@ -201,8 +206,8 @@ func (m *Sealing) checkCommit(ctx context.Context, si SectorInfo, proof []byte, 
 	if *si.CommR != pci.Info.SealedCID {
 		log.Warn("on-chain sealed CID doesn't match!")
 	}
-
-	ok, err := m.verif.VerifySeal(prooftypes.SealVerifyInfo{
+	//Do not verify the proof, as the validation of it is checked when generating it.
+	/*ok, err := m.verif.VerifySeal(prooftypes.SealVerifyInfo{
 		SectorID:              m.minerSectorID(si.SectorNumber),
 		SealedCID:             pci.Info.SealedCID,
 		SealProof:             pci.Info.SealProof,
@@ -216,7 +221,7 @@ func (m *Sealing) checkCommit(ctx context.Context, si SectorInfo, proof []byte, 
 	}
 	if !ok {
 		return &ErrInvalidProof{xerrors.New("invalid proof (compute error?)")}
-	}
+	}*/
 
 	if err := checkPieces(ctx, m.maddr, si.SectorNumber, si.Pieces, m.Api, false); err != nil {
 		return err

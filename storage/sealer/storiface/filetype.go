@@ -2,6 +2,10 @@ package storiface
 
 import (
 	"fmt"
+	"io"
+	"os"
+
+	//"io/ioutil"
 
 	"golang.org/x/xerrors"
 
@@ -260,4 +264,39 @@ func SetPathByType(sps *SectorPaths, fileType SectorFileType, p string) {
 	case FTUpdateCache:
 		sps.UpdateCache = p
 	}
+}
+
+func CopyFile(srcFile, dstFile string) error {
+	source, err := os.Open(srcFile)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	destination, err := os.Create(dstFile)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+
+	_, err = io.Copy(destination, source)
+
+	return nil
+}
+
+func ReadFile(tagFile string, length uint64) ([]byte, error) {
+	target, err := os.Open(tagFile)
+	if err != nil {
+		return nil, err
+	}
+	defer target.Close()
+
+	buf := make([]byte, length)
+
+	_, err = target.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf, nil
 }

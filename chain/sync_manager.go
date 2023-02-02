@@ -195,7 +195,7 @@ func (sm *syncManager) scheduler() {
 }
 
 func (sm *syncManager) handlePeerHead(head peerHead) {
-	log.Debugf("new peer head: %s %s", head.p, head.ts)
+	log.Infof("new peer head: %s %s", head.p, head.ts)
 
 	// have we started syncing yet?
 	if sm.nextWorker == 0 {

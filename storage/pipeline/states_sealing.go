@@ -3,9 +3,16 @@ package sealing
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"math"
+
+	//"encoding/json"
+	"encoding/binary"
 	"io"
-	"net/http"
+	"os"
+	"strconv"
+
+	//"net/http"
+	"crypto/sha256"
 
 	"github.com/ipfs/go-cid"
 	"golang.org/x/xerrors"
@@ -28,11 +35,16 @@ import (
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/storage/pipeline/lib/nullreader"
 	"github.com/filecoin-project/lotus/storage/sealer/storiface"
+
+	mc "github.com/multiformats/go-multicodec"
+	mh "github.com/multiformats/go-multihash"
+	varint "github.com/multiformats/go-varint"
 )
 
 var DealSectorPriority = 1024
 var MaxTicketAge = policy.MaxPreCommitRandomnessLookback
 
+//Changed by JiaHao Zhang, we never pad the sector as the size of it is dynamic.
 func (m *Sealing) handlePacking(ctx statemachine.Context, sector SectorInfo) error {
 	m.inputLk.Lock()
 	// make sure we are not accepting deals into this sector
@@ -52,12 +64,14 @@ func (m *Sealing) handlePacking(ctx statemachine.Context, sector SectorInfo) err
 	delete(m.assignedPieces, m.minerSectorID(sector.SectorNumber))
 	m.inputLk.Unlock()
 
+	log.Infow("In storagelite, we never performing filling up rest of the sector as the size of the sector is dynamic...", "sector", sector.SectorNumber)
+
 	// if this is a snapdeals sector, but it ended up not having any deals, abort the upgrade
 	if sector.State == SnapDealsPacking && !sector.hasDeals() {
 		return ctx.Send(SectorAbortUpgrade{xerrors.New("sector had no deals")})
 	}
 
-	log.Infow("performing filling up rest of the sector...", "sector", sector.SectorNumber)
+	//log.Infow("performing filling up rest of the sector...", "sector", sector.SectorNumber)
 
 	var allocated abi.UnpaddedPieceSize
 	for _, piece := range sector.Pieces {
@@ -75,7 +89,7 @@ func (m *Sealing) handlePacking(ctx statemachine.Context, sector SectorInfo) err
 		return xerrors.Errorf("too much data in sector: %d > %d", allocated, ubytes)
 	}
 
-	fillerSizes, err := fillersFromRem(ubytes - allocated)
+	/*fillerSizes, err := fillersFromRem(ubytes - allocated)
 	if err != nil {
 		return err
 	}
@@ -89,7 +103,8 @@ func (m *Sealing) handlePacking(ctx statemachine.Context, sector SectorInfo) err
 		return xerrors.Errorf("filling up the sector (%v): %w", fillerSizes, err)
 	}
 
-	return ctx.Send(SectorPacked{FillerPieces: fillerPieces})
+	return ctx.Send(SectorPacked{FillerPieces: fillerPieces})*/
+	return ctx.Send(SectorPacked{})
 }
 
 func (m *Sealing) padSector(ctx context.Context, sectorID storiface.SectorRef, existingPieceSizes []abi.UnpaddedPieceSize, sizes ...abi.UnpaddedPieceSize) ([]abi.PieceInfo, error) {
@@ -270,13 +285,25 @@ func (m *Sealing) handlePreCommit1(ctx statemachine.Context, sector SectorInfo) 
 		return ctx.Send(SectorSealPreCommit1Failed{xerrors.Errorf("seal pre commit(1) failed: %w", err)})
 	}
 
-	return ctx.Send(SectorPreCommit1{
-		PreCommit1Out: pc1o,
-	})
+	lenth_pc1o := len(pc1o)
+	data := strconv.Itoa(lenth_pc1o)
+	file, _ := os.Create("test_sector_porep_size" + strconv.Itoa(int(sector.SectorNumber)))
+	defer file.Close()
+	file.WriteString(data)
+	if len(pc1o) >= 2<<20 {
+		return ctx.Send(SectorPreCommit1{
+			PreCommit1Out: pc1o[:2<<10],
+		})
+	} else {
+		return ctx.Send(SectorPreCommit1{
+			PreCommit1Out: pc1o,
+		})
+	}
 }
 
 func (m *Sealing) handlePreCommit2(ctx statemachine.Context, sector SectorInfo) error {
-	cids, err := m.sealer.SealPreCommit2(sector.sealingCtx(ctx.Context()), m.minerSector(sector.SectorType, sector.SectorNumber), sector.PreCommit1Out)
+	pc1o, err := m.sealer.SealPreCommit1(sector.sealingCtx(ctx.Context()), m.minerSector(sector.SectorType, sector.SectorNumber), sector.TicketValue, sector.pieceInfos())
+	cids, err := m.sealer.SealPreCommit2(sector.sealingCtx(ctx.Context()), m.minerSector(sector.SectorType, sector.SectorNumber), pc1o)
 	if err != nil {
 		return ctx.Send(SectorSealPreCommit2Failed{xerrors.Errorf("seal pre commit(2) failed: %w", err)})
 	}
@@ -354,6 +381,14 @@ func (m *Sealing) preCommitInfo(ctx statemachine.Context, sector SectorInfo) (*m
 		expiration = maxExpiration
 	}
 
+	var dealCommP cid.Cid
+
+	for _, p := range sector.Pieces {
+		if p.DealInfo != nil {
+			dealCommP = p.DealInfo.DealProposal.PieceCID
+		}
+	}
+
 	params := &miner.SectorPreCommitInfo{
 		Expiration:   expiration,
 		SectorNumber: sector.SectorNumber,
@@ -362,6 +397,7 @@ func (m *Sealing) preCommitInfo(ctx statemachine.Context, sector SectorInfo) (*m
 		SealedCID:     *sector.CommR,
 		SealRandEpoch: sector.TicketEpoch,
 		DealIDs:       sector.dealIDs(),
+		UnsealedCid:   &dealCommP,
 	}
 
 	collateral, err := m.Api.StateMinerPreCommitDepositForPower(ctx.Context(), m.maddr, *params, ts.Key())
@@ -372,6 +408,7 @@ func (m *Sealing) preCommitInfo(ctx statemachine.Context, sector SectorInfo) (*m
 	return params, collateral, ts.Key(), nil
 }
 
+//Changed by JiaHao Zhang add the ckeck of file increment
 func (m *Sealing) handlePreCommitting(ctx statemachine.Context, sector SectorInfo) error {
 	cfg, err := m.getConfig()
 	if err != nil {
@@ -397,7 +434,7 @@ func (m *Sealing) handlePreCommitting(ctx statemachine.Context, sector SectorInf
 		return nil // event was sent in preCommitInfo
 	}
 
-	params := infoToPreCommitSectorParams(info)
+	params := infoToPreCommitSectorParams(info, sector)
 
 	deposit, err := collateralSendAmount(ctx.Context(), m.Api, m.maddr, cfg, pcd)
 	if err != nil {
@@ -408,6 +445,8 @@ func (m *Sealing) handlePreCommitting(ctx statemachine.Context, sector SectorInf
 	if err := params.MarshalCBOR(enc); err != nil {
 		return ctx.Send(SectorChainPreCommitFailed{xerrors.Errorf("could not serialize pre-commit sector parameters: %w", err)})
 	}
+
+	log.Infof("generate the precommit parameters, this will be put on chain:{\nSectorNumber:%v\nSealedCID:%v\nSealRandEpoch:%v\nIncSaved:%v\n}", params.SectorNumber, params.SealedCID, params.SealRandEpoch, params.ReplaceCapacity)
 
 	mi, err := m.Api.StateMinerInfo(ctx.Context(), m.maddr, tsk)
 	if err != nil {
@@ -499,12 +538,70 @@ func (m *Sealing) handleWaitSeed(ctx statemachine.Context, sector SectorInfo) er
 	}
 
 	pci, err := m.Api.StateSectorPreCommitInfo(ctx.Context(), m.maddr, sector.SectorNumber, ts.Key())
+	//log.Info("miner address: ", m.maddr.String())
 	if err != nil {
 		return xerrors.Errorf("getting precommit info: %w", err)
 	}
 	if pci == nil {
 		return ctx.Send(SectorChainPreCommitFailed{error: xerrors.Errorf("precommit info not found on chain")})
 	}
+
+	var dealCommP cid.Cid
+
+	for _, p := range sector.Pieces {
+		if p.DealInfo != nil {
+			dealCommP = p.DealInfo.DealProposal.PieceCID
+		}
+	}
+	//bagboea4b5abcb2ayvqbiavm72ikblucmnictxsoinnusxkgwsdq3fasy7o4p2ohd
+	//baga6ea4seaqn2ahzcqkepfro7vlvf5ptzxbhsykkmgsyq3oop3kzmjvlhm3rgba
+
+	log.Info("save some data in per commit info: prooftype: ", int32(pci.Info.SealProof), "sector num: ", int32(pci.Info.SectorNumber), "sealedCID: ", pci.Info.SealedCID.String(), "piece commP: ", dealCommP)
+
+	buffer1 := bytes.NewBuffer([]byte{})
+	buffer2 := bytes.NewBuffer([]byte{})
+	buffer3 := bytes.NewBuffer([]byte{})
+	buffer4 := bytes.NewBuffer([]byte{})
+
+	var params []byte
+
+	prooftype := int32(pci.Info.SealProof)
+	sec_num := int32(pci.Info.SectorNumber)
+	sealedCID := pci.Info.SealedCID.Bytes()
+	unsealedCID := dealCommP.Bytes()
+	binary.Write(buffer1, binary.BigEndian, prooftype)
+	prooftype_B := buffer1.Bytes()
+
+	binary.Write(buffer2, binary.BigEndian, sec_num)
+	sec_num_B := buffer2.Bytes()
+
+	lengt_sCID := len(sealedCID)
+	lengt_uCID := len(unsealedCID)
+
+	binary.Write(buffer3, binary.BigEndian, int32(lengt_sCID))
+	len_sCID_B := buffer3.Bytes()
+
+	binary.Write(buffer4, binary.BigEndian, int32(lengt_uCID))
+	len_uCID_B := buffer4.Bytes()
+
+	params = append(params, prooftype_B...)
+	params = append(params, sec_num_B...)
+	params = append(params, len_sCID_B...)
+	params = append(params, sealedCID...)
+	params = append(params, len_uCID_B...)
+	params = append(params, unsealedCID...)
+
+	log.Info("length of params: ", len(params), "length of sealedCID: ", lengt_sCID, "length of piece commP: ", lengt_uCID)
+
+	filename := "sector" + sector.SectorNumber.String() + "pre"
+
+	file, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	file.Write(params)
 
 	randHeight := pci.PreCommitEpoch + policy.GetPreCommitChallengeDelay()
 
@@ -572,7 +669,7 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("sector had nil commR or commD")})
 	}
 
-	var c2in storiface.Commit1Out
+	/*var c2in storiface.Commit1Out
 	if sector.RemoteCommit1Endpoint == "" {
 		// Local Commit1
 		cids := storiface.SectorCids{
@@ -585,6 +682,7 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 		}
 	} else {
 		// Remote Commit1
+		//DO NOT SUPPORT!!!!!!!
 
 		reqData := api.RemoteCommit1Params{
 			Ticket:    sector.TicketValue,
@@ -619,11 +717,11 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 		if err != nil {
 			return ctx.Send(SectorRemoteCommit1Failed{xerrors.Errorf("reading commit1 response: %w", err)})
 		}
-	}
+	}*/
 
 	var porepProof storiface.Proof
 
-	if sector.RemoteCommit2Endpoint == "" {
+	/*if sector.RemoteCommit2Endpoint == "" {
 		// Local Commit2
 
 		porepProof, err = m.sealer.SealCommit2(sector.sealingCtx(ctx.Context()), m.minerSector(sector.SectorType, sector.SectorNumber), c2in)
@@ -677,6 +775,33 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 		if err := m.checkCommit(ctx.Context(), sector, porepProof, ts.Key()); err != nil {
 			return ctx.Send(SectorCommitFailed{xerrors.Errorf("commit check error: %w", err)})
 		}
+	}*/
+	pc1o, err := m.sealer.SealPreCommit1(sector.sealingCtx(ctx.Context()), m.minerSector(sector.SectorType, sector.SectorNumber), sector.TicketValue, sector.pieceInfos())
+	if err != nil {
+		return ctx.Send(SectorSealPreCommit1Failed{xerrors.Errorf("seal pre commit(1) failed: %w", err)})
+	}
+	/*var data = []float64{}
+	for i := 0; i < 5; i++ {
+		start := time.Now()
+		_ = PoS_Generation(pc1o, sector.SeedValue, *sector.CommR)
+		elapsed := time.Since(start).Seconds()
+		data = append(data, elapsed)
+	}
+	Mean := mean(data)
+	Std := std(data)
+	f, _ := os.Create("sto_PoS" + sector.SectorNumber.String())
+	defer f.Close()
+	f.WriteString("mean: " + strconv.FormatFloat(Mean, 'f', -1, 32))
+	f.WriteString("std: " + strconv.FormatFloat(Std, 'f', -1, 32))*/
+
+	porepProof = PoS_Generation(pc1o, sector.SeedValue, *sector.CommR)
+
+	/*if len(porepProof) > 192 {
+		porepProof = porepProof[:192]
+	}*/
+
+	if porepProof == nil {
+		return ctx.Send(SectorComputeProofFailed{})
 	}
 
 	if cfg.FinalizeEarly {
@@ -690,11 +815,118 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 	})
 }
 
+type Node2 struct {
+	value []byte
+	tag   bool
+}
+
+func PoS_Generation(phase1Out storiface.PreCommit1Out, seed abi.InteractiveSealRandomness, root cid.Cid) []byte {
+	var leafs []*Node2
+	proof := []byte{}
+
+	reader := bytes.NewReader(phase1Out)
+
+	for {
+		buf := make([]byte, 32)
+		n, err := reader.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return nil
+			}
+		}
+		file_data := buf[:n]
+		leafs = append(leafs, &Node2{value: file_data, tag: false})
+	}
+	chal := gen_challenge(seed, len(leafs))
+
+	leafs[chal].tag = true
+	proof = append(proof, leafs[chal].value...)
+
+	for len(leafs) > 1 {
+		tmp := []*Node2{}
+		for len(leafs) >= 1 {
+			value0 := leafs[0]
+			leafs = leafs[1:]
+			if len(leafs) > 0 {
+				value1 := leafs[0]
+				leafs = leafs[1:]
+				rawdata := XOR(value0.value, value1.value)
+				hash := sha256.Sum256(rawdata)
+				if value0.tag == true {
+					tmp = append(tmp, &Node2{value: hash[:], tag: true})
+					proof = append(proof, value1.value...)
+				} else if value1.tag == true {
+					tmp = append(tmp, &Node2{value: hash[:], tag: true})
+					proof = append(proof, value0.value...)
+				} else {
+					tmp = append(tmp, &Node2{value: hash[:], tag: false})
+				}
+			} else {
+				tmp = append(tmp, value0)
+			}
+		}
+		leafs = tmp
+	}
+
+	root_tmp := leafs[0].value
+
+	MhType := mh.POSEIDON_BLS12_381_A1_FC1
+
+	mhBuf := make(
+		[]byte,
+		(varint.UvarintSize(uint64(MhType)) + varint.UvarintSize(uint64(len(root_tmp))) + len(root_tmp)),
+	)
+
+	pos := varint.PutUvarint(mhBuf, uint64(MhType))
+	pos += varint.PutUvarint(mhBuf[pos:], uint64(len(root_tmp)))
+	copy(mhBuf[pos:], root_tmp)
+
+	CID := cid.NewCidV1(uint64(mc.FilCommitmentSealed), mh.Multihash(mhBuf))
+
+	if !CID.Equals(root) {
+		return nil
+	}
+
+	/*CID := cid.NewCidV0(root_tmp)
+	if CID != root {
+		return nil
+	}*/
+
+	return proof
+}
+
+func gen_challenge(seed abi.InteractiveSealRandomness, leng int) uint32 {
+	length := len(seed)
+	var chal uint32
+	for i := 0; i < length; i++ {
+		chal += uint32(seed[i])
+	}
+	chal = chal % uint32(leng)
+	return chal
+}
+
+func XOR(value0, value1 []byte) []byte {
+	length := len(value0)
+	result := make([]byte, length)
+	for i := 0; i < length; i++ {
+		i0 := uint8(value0[i])
+		i1 := uint8(value1[i])
+		tmp := i0 ^ i1
+		result[i] = byte(tmp)
+	}
+	return result
+}
+
 func (m *Sealing) handleSubmitCommit(ctx statemachine.Context, sector SectorInfo) error {
 	cfg, err := m.getConfig()
 	if err != nil {
 		return xerrors.Errorf("getting config: %w", err)
 	}
+
+	ver, err := m.Api.StateNetworkVersion(ctx.Context(), types.EmptyTSK)
+	log.Infof("the version of the network is %v\n", ver)
 
 	if cfg.AggregateCommits {
 		nv, err := m.Api.StateNetworkVersion(ctx.Context(), types.EmptyTSK)
@@ -717,10 +949,16 @@ func (m *Sealing) handleSubmitCommit(ctx statemachine.Context, sector SectorInfo
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("commit check error: %w", err)})
 	}
 
+	porepproof := sector.Proof
+
+	if len(porepproof) > 192 {
+		porepproof = porepproof[:192]
+	}
+
 	enc := new(bytes.Buffer)
 	params := &miner.ProveCommitSectorParams{
 		SectorNumber: sector.SectorNumber,
-		Proof:        sector.Proof,
+		Proof:        porepproof,
 	}
 
 	if err := params.MarshalCBOR(enc); err != nil {
@@ -765,6 +1003,45 @@ func (m *Sealing) handleSubmitCommit(ctx statemachine.Context, sector SectorInfo
 
 	// TODO: check seed / ticket / deals are up to date
 	mcid, err := sendMsg(ctx.Context(), m.Api, from, m.maddr, builtin.MethodsMiner.ProveCommitSector, collateral, big.Int(m.feeCfg.MaxCommitGasFee), enc.Bytes())
+
+	if err != nil {
+		return ctx.Send(SectorCommitFailed{xerrors.Errorf("pushing message to mpool: %w", err)})
+	}
+
+	lengt_proof := len(sector.Proof)
+	var dealCommP cid.Cid
+
+	for _, p := range sector.Pieces {
+		if p.DealInfo != nil {
+			dealCommP = p.DealInfo.DealProposal.PieceCID
+		}
+	}
+
+	dealID_B := dealCommP.Bytes()
+	lengt_dealID := dealCommP.ByteLen()
+
+	buffer1 := bytes.NewBuffer([]byte{})
+	buffer2 := bytes.NewBuffer([]byte{})
+
+	binary.Write(buffer1, binary.BigEndian, int32(lengt_proof))
+	len_proof_B := buffer1.Bytes()
+
+	binary.Write(buffer2, binary.BigEndian, int32(lengt_dealID))
+	len_dealID_B := buffer2.Bytes()
+
+	var param []byte
+
+	param = append(param, len_proof_B...)
+	param = append(param, sector.Proof...)
+	param = append(param, len_dealID_B...)
+	param = append(param, dealID_B...)
+
+	//dec_cid, err := cid.Cast(dealID_B)
+
+	log.Info("length of the proof: ", lengt_proof, " length of the dealCommP: ", lengt_dealID, " length of the param: ", len(param), " commP: ", dealCommP)
+
+	_, err = sendMsg(ctx.Context(), m.Api, from, m.maddr, 0, collateral, big.Int(m.feeCfg.MaxCommitGasFee), param)
+
 	if err != nil {
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("pushing message to mpool: %w", err)})
 	}
@@ -839,13 +1116,14 @@ func (m *Sealing) handleCommitWait(ctx statemachine.Context, sector SectorInfo) 
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("submitting sector proof failed (exit=%d, msg=%s) (t:%x; s:%x(%d); p:%x)", mw.Receipt.ExitCode, sector.CommitMessage, sector.TicketValue, sector.SeedValue, sector.SeedEpoch, sector.Proof)})
 	}
 
-	si, err := m.Api.StateSectorGetInfo(ctx.Context(), m.maddr, sector.SectorNumber, mw.TipSet)
+	/*si, err := m.Api.StateSectorGetInfo(ctx.Context(), m.maddr, sector.SectorNumber, mw.TipSet)
 	if err != nil {
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("proof validation failed, calling StateSectorGetInfo: %w", err)})
 	}
 	if si == nil {
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("proof validation failed, sector not found in sector set after cron")})
-	}
+	}*/
+	log.Infof("sector message: SAVEINC:=%s\n", sector.LastErr)
 
 	return ctx.Send(SectorProving{})
 }
@@ -866,4 +1144,26 @@ func (m *Sealing) handleFinalizeSector(ctx statemachine.Context, sector SectorIn
 		return ctx.Send(SectorFinalizedAvailable{})
 	}
 	return ctx.Send(SectorFinalized{})
+}
+
+func mean(v []float64) float64 {
+	var res float64 = 0
+	var n int = len(v)
+	for i := 0; i < n; i++ {
+		res += v[i]
+	}
+	return res / float64(n)
+}
+
+func variance(v []float64) float64 {
+	var res float64 = 0
+	var m = mean(v)
+	var n int = len(v)
+	for i := 0; i < n; i++ {
+		res += (v[i] - m) * (v[i] - m)
+	}
+	return res / float64(n-1)
+}
+func std(v []float64) float64 {
+	return math.Sqrt(variance(v))
 }

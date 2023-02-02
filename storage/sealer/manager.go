@@ -24,6 +24,7 @@ import (
 	"github.com/filecoin-project/lotus/storage/sealer/fsutil"
 	"github.com/filecoin-project/lotus/storage/sealer/sealtasks"
 	"github.com/filecoin-project/lotus/storage/sealer/storiface"
+	"github.com/filecoin-project/specs-actors/v7/actors/runtime/proof"
 )
 
 var log = logging.Logger("advmgr")
@@ -1312,6 +1313,10 @@ func (m *Manager) Close(ctx context.Context) error {
 	m.windowPoStSched.schedClose()
 	m.winningPoStSched.schedClose()
 	return m.sched.Close(ctx)
+}
+
+func (m *Manager) GenerateWindowPoSt2(ctx context.Context, minerID abi.ActorID, sectorInfo []proof.SectorInfo, randomness abi.PoStRandomness) ([]proof.PoStProof, []abi.SectorID, error) {
+	return m.localProver.GenerateWindowPoSt2(ctx, minerID, sectorInfo, randomness)
 }
 
 var _ Unsealer = &Manager{}

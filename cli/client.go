@@ -2,11 +2,16 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+
+	//"crypto/ecdsa"
+	//"crypto/elliptic"
+	//crand "crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/filecoin-project/lotus/lib/dyaic"
 	"io"
 	"math"
 	"math/rand"
@@ -19,6 +24,9 @@ import (
 	"sync/atomic"
 	"text/tabwriter"
 	"time"
+
+	//"github.com/drand/kyber/encrypt/ecies"
+	"github.com/filecoin-project/lotus/lib/dyaic"
 
 	tm "github.com/buger/goterm"
 	"github.com/chzyer/readline"
@@ -47,6 +55,7 @@ import (
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/lib/tablewriter"
 	"github.com/filecoin-project/lotus/node/repo/imports"
+	//"github.com/filecoin-project/go-fil-markets/storagemarket/impl/clientutils"
 )
 
 var CidBaseFlag = cli.StringFlag{
@@ -313,6 +322,7 @@ var clientLocalCmd = &cli.Command{
 	},
 }
 
+//modified by jiahao zhang. Adding support to save file increment in the filecoin.
 var clientDealCmd = &cli.Command{
 	Name:  "deal",
 	Usage: "Initialize storage deal with a miner",
@@ -360,6 +370,23 @@ The minimum value is 518400 (6 months).`,
 		&cli.StringFlag{
 			Name:  "provider-collateral",
 			Usage: "specify the requested provider collateral the miner should put up",
+		},
+		&cli.BoolFlag{
+			Name:  "increment",
+			Usage: "indicates that whether the data is increment or not. Note that we use the commP as the ID, so if you want to save increment, please create a car file using generate-car cmd and get the commP of the original and increment file using commP cmd first!!",
+			Value: false,
+		},
+		&cli.StringFlag{
+			Name:  "original-file",
+			Usage: "the commP of the original file of this increment, must be provided when the increment flag is set to true. Please use the generate-car cmd and commP cmd to generate the commP first!!",
+		},
+		&cli.StringFlag{
+			Name:  "cur-commP",
+			Usage: "the commP of the increment file, used as the indentity, must be provided when the increment flag is set. Please use the generate-car cmd and commP cmd to generate the commP first!!",
+		},
+		&cli.StringFlag{
+			Name:  "version",
+			Usage: "the version of the increment file, must be provided if the increment flag is set.",
 		},
 		&CidBaseFlag,
 	},
@@ -483,13 +510,26 @@ The minimum value is 518400 (6 months).`,
 			isVerified = verifiedDealParam
 		}
 
+		epoch := abi.ChainEpoch(cctx.Int64("start-epoch"))
+
+		Isinc := false
+		var orif string
+		var ver string
+		var cur_commP string
+		if cctx.IsSet("increment") {
+			Isinc = true
+			orif = cctx.String("original-file")
+			cur_commP = cctx.String("cur-commP")
+			ver = cctx.String("version")
+		}
+
 		sdParams := &lapi.StartDealParams{
 			Data:               ref,
 			Wallet:             a,
 			Miner:              miner,
 			EpochPrice:         types.BigInt(price),
 			MinBlocksDuration:  uint64(dur),
-			DealStartEpoch:     abi.ChainEpoch(cctx.Int64("start-epoch")),
+			DealStartEpoch:     epoch,
 			FastRetrieval:      cctx.Bool("fast-retrieval"),
 			VerifiedDeal:       isVerified,
 			ProviderCollateral: provCol,
@@ -515,9 +555,102 @@ The minimum value is 518400 (6 months).`,
 		}
 
 		afmt.Println(encoder.Encode(*proposal))
+		//send extra message for increment file
+		if Isinc {
+			maxFee := types.MustParseFIL("0.05")
+			msg, err := CreateExtraIncMessage(ctx, api, miner, miner, cur_commP, orif, ver)
+			if err != nil {
+				return xerrors.Errorf("failed to create increment message: %w", err)
+			}
+			_, err = api.MpoolPushMessage(ctx, &msg, &lapi.MessageSendSpec{MaxFee: big.Int(maxFee)})
+			if err != nil {
+				afmt.Println("send extra message err: ", err)
+			}
+		}
+
+		t := time.Now()
+		file, _ := os.Create("deal_start_" + t.String())
+		defer file.Close()
+		file.WriteString("deal start, timestrap: " + t.String())
 
 		return nil
 	},
+}
+
+//created by jiahao zhang. dealID is something misleading, this is actually the commP of the incerment file.
+func CreateExtraIncMessage(ctx context.Context, api v0api.FullNode, to, aggregator address.Address, dealID, ori_file, version string) (types.Message, error) {
+	from, _ := api.WalletDefaultAddress(ctx)
+	Val, _ := big.FromString(version)
+	buffer1 := bytes.NewBuffer([]byte{})
+	buffer2 := bytes.NewBuffer([]byte{})
+	buffer3 := bytes.NewBuffer([]byte{})
+
+	addr_B := aggregator.Bytes()
+	len_addr := len(addr_B)
+	binary.Write(buffer1, binary.BigEndian, int32(len_addr))
+	len_addr_B := buffer1.Bytes()
+	log.Info("the length of the addr byte ", len_addr, "the length of the length ", len(len_addr_B))
+
+	deal_B := []byte(dealID)
+	len_deal := len(deal_B)
+	binary.Write(buffer2, binary.BigEndian, int32(len_deal))
+	len_deal_B := buffer2.Bytes()
+	log.Info("the length of the addr byte ", len_deal, "the length of the length ", len(len_deal_B))
+
+	ori_file_B := []byte(ori_file)
+	len_ori_file := len(ori_file_B)
+	binary.Write(buffer3, binary.BigEndian, int32(len_ori_file))
+	len_ori_file_B := buffer3.Bytes()
+	log.Info("the length of the addr byte ", len_ori_file, "the length of the length ", len(len_ori_file_B))
+
+	var param []byte
+	param = append(param, len_addr_B...)
+	param = append(param, addr_B...)
+	param = append(param, len_deal_B...)
+	param = append(param, deal_B...)
+	param = append(param, len_ori_file_B...)
+	param = append(param, ori_file_B...)
+
+	//testing for decode
+	var lengt int32
+	pointer := 0
+	len_B := param[pointer : pointer+4]
+	dec_buffer1 := bytes.NewBuffer(len_B)
+	binary.Read(dec_buffer1, binary.BigEndian, &lengt)
+
+	pointer = pointer + 4
+	dec_addr_B := param[pointer : pointer+int(lengt)]
+	dec_addr, _ := address.NewFromBytes(dec_addr_B)
+	log.Info("decode:", dec_addr, "expected:", aggregator)
+
+	pointer = pointer + int(lengt)
+	len_B = param[pointer : pointer+4]
+	dec_buffer2 := bytes.NewBuffer(len_B)
+	binary.Read(dec_buffer2, binary.BigEndian, &lengt)
+
+	pointer = pointer + 4
+	dec_deal_B := param[pointer : pointer+int(lengt)]
+	log.Info("decode:", string(dec_deal_B), "expected:", string(deal_B))
+
+	pointer = pointer + int(lengt)
+	len_B = param[pointer : pointer+4]
+	dec_buffer3 := bytes.NewBuffer(len_B)
+	binary.Read(dec_buffer3, binary.BigEndian, &lengt)
+
+	pointer = pointer + 4
+	dec_ori_file_B := param[pointer : pointer+int(lengt)]
+	log.Info("decode:", string(dec_ori_file_B), "expected:", string(ori_file_B))
+
+	//testing for decode
+
+	msg := types.Message{
+		From:   from,
+		To:     to,
+		Value:  Val,
+		Method: 0,
+		Params: param, //length + value
+	}
+	return msg, nil
 }
 
 func interactiveDeal(cctx *cli.Context) error {

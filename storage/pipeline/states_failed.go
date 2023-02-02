@@ -275,7 +275,7 @@ func (m *Sealing) handleReleaseSectorKeyFailed(ctx statemachine.Context, sector 
 }
 
 func (m *Sealing) handleCommitFailed(ctx statemachine.Context, sector SectorInfo) error {
-	ts, err := m.Api.ChainHead(ctx.Context())
+	/*ts, err := m.Api.ChainHead(ctx.Context())
 	if err != nil {
 		log.Errorf("handleCommitting: api error, not proceeding: %+v", err)
 		return nil
@@ -354,7 +354,8 @@ func (m *Sealing) handleCommitFailed(ctx statemachine.Context, sector SectorInfo
 		return err
 	}
 
-	return ctx.Send(SectorRetryComputeProof{})
+	return ctx.Send(SectorRetryComputeProof{})*/
+	return nil
 }
 
 func (m *Sealing) handleFinalizeFailed(ctx statemachine.Context, sector SectorInfo) error {

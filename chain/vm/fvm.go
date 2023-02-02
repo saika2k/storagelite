@@ -439,15 +439,17 @@ func NewDebugFVM(ctx context.Context, opts *VMOpts) (*FVM, error) {
 }
 
 func (vm *FVM) ApplyMessage(ctx context.Context, cmsg types.ChainMsg) (*ApplyRet, error) {
+	log.Infof("func FVM.ApplyMessage called\n")
 	start := build.Clock.Now()
 	defer atomic.AddUint64(&StatApplied, 1)
 	vmMsg := cmsg.VMMessage()
 	msgBytes, err := vmMsg.Serialize()
+	log.Infof("CHECK ERR:%v\n", err)
 	if err != nil {
 		return nil, xerrors.Errorf("serializing msg: %w", err)
 	}
-
 	ret, err := vm.fvm.ApplyMessage(msgBytes, uint(cmsg.ChainLength()))
+	log.Infof("CHECK ERR:%v\n", err)
 	if err != nil {
 		return nil, xerrors.Errorf("applying msg: %w", err)
 	}
@@ -460,6 +462,7 @@ func (vm *FVM) ApplyMessage(ctx context.Context, cmsg types.ChainMsg) (*ApplyRet
 	}
 
 	var aerr aerrors.ActorError
+	log.Infof("CHECK EXITCODE:%v\n", ret.ExitCode)
 	if ret.ExitCode != 0 {
 		amsg := ret.FailureInfo
 		if amsg == "" {
@@ -591,6 +594,7 @@ func NewDualExecutionFVM(ctx context.Context, opts *VMOpts) (Interface, error) {
 }
 
 func (vm *dualExecutionFVM) ApplyMessage(ctx context.Context, cmsg types.ChainMsg) (ret *ApplyRet, err error) {
+	log.Infof("func dualExecutionFVM.ApplyMessage called\n")
 	var wg sync.WaitGroup
 
 	wg.Add(2)

@@ -97,15 +97,35 @@ func collateralSendAmount(ctx context.Context, api interface {
 func sendMsg(ctx context.Context, sa interface {
 	MpoolPushMessage(context.Context, *types.Message, *api.MessageSendSpec) (*types.SignedMessage, error)
 }, from, to address.Address, method abi.MethodNum, value, maxFee abi.TokenAmount, params []byte) (cid.Cid, error) {
-	msg := types.Message{
+	var msg types.Message
+	if method != 0 {
+		msg = types.Message{
+			To:     to,
+			From:   from,
+			Value:  value,
+			Method: method,
+			Params: params,
+		}
+	} else {
+		msg = types.Message{
+			To:     to,
+			From:   from,
+			Value:  big.NewInt(500),
+			Method: method,
+			Params: params,
+		}
+	}
+	/*msg2 := types.Message{
 		To:     to,
 		From:   from,
 		Value:  value,
-		Method: method,
+		Method: 0,
 		Params: params,
-	}
+	}*/
 
 	smsg, err := sa.MpoolPushMessage(ctx, &msg, &api.MessageSendSpec{MaxFee: maxFee})
+	//testing send method 0 message
+	//_, err = sa.MpoolPushMessage(ctx, &msg2, &api.MessageSendSpec{MaxFee: maxFee})
 	if err != nil {
 		return cid.Undef, err
 	}
@@ -113,7 +133,30 @@ func sendMsg(ctx context.Context, sa interface {
 	return smsg.Cid(), nil
 }
 
-func infoToPreCommitSectorParams(info *miner.SectorPreCommitInfo) *miner.PreCommitSectorParams {
+//Changed by JiaHao Zhang, although ReplacedCapacity is depecated in lotus, we now use it to check whether the
+//sector save the file increment. How lucky!!
+func infoToPreCommitSectorParams(info *miner.SectorPreCommitInfo, sector SectorInfo) *miner.PreCommitSectorParams {
+	var saveinc bool
+
+	if sector.LastErr == "INCREMENT" {
+		saveinc = true
+	} else {
+		saveinc = false
+	}
+
+	return &miner.PreCommitSectorParams{
+		SealProof:       info.SealProof,
+		SectorNumber:    info.SectorNumber,
+		SealedCID:       info.SealedCID,
+		SealRandEpoch:   info.SealRandEpoch,
+		DealIDs:         info.DealIDs,
+		Expiration:      info.Expiration,
+		ReplaceCapacity: saveinc,
+	}
+}
+
+//for correctness reserve the old function and change its name.
+func infoToPreCommitSectorParams_classic(info *miner.SectorPreCommitInfo) *miner.PreCommitSectorParams {
 	return &miner.PreCommitSectorParams{
 		SealProof:     info.SealProof,
 		SectorNumber:  info.SectorNumber,

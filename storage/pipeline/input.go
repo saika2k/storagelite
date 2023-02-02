@@ -2,7 +2,9 @@ package sealing
 
 import (
 	"context"
+	"os"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -83,6 +85,8 @@ func (m *Sealing) handleWaitDeals(ctx statemachine.Context, sector SectorInfo) e
 	return nil
 }
 
+//Changed by JiaHao Zhang, make the condition suitable for storagelite
+//One sector one file.
 func (m *Sealing) maybeStartSealing(ctx statemachine.Context, sector SectorInfo, used abi.UnpaddedPieceSize) (bool, error) {
 	now := time.Now()
 	st := m.sectorTimers[m.minerSectorID(sector.SectorNumber)]
@@ -98,7 +102,7 @@ func (m *Sealing) maybeStartSealing(ctx statemachine.Context, sector SectorInfo,
 	if err != nil {
 		return false, xerrors.Errorf("getting sector size")
 	}
-
+	// maxDeal=1 in storagelite, which means one sector one file.
 	maxDeals, err := getDealPerSectorLimit(ssize)
 	if err != nil {
 		return false, xerrors.Errorf("getting per-sector deal limit: %w", err)
@@ -254,6 +258,10 @@ func (m *Sealing) handleAddPiece(ctx statemachine.Context, sector SectorInfo) er
 			deal.accepted(sector.SectorNumber, offset, err)
 			return ctx.Send(SectorAddPieceFailed{err})
 		}
+		if deal.deal.DealProposal.StartEpoch != -1 {
+			log.Infof("get increment deal, decided by the startepoch: %v\n", deal.deal.DealProposal.StartEpoch)
+			sector.LastErr = "INCREMENT"
+		}
 
 		log.Infow("deal added to a sector", "deal", deal.deal.DealID, "sector", sector.SectorNumber, "piece", ppi.PieceCID)
 
@@ -391,6 +399,7 @@ func (m *Sealing) SectorMatchPendingPiecesToOpenSectors(ctx context.Context) err
 type expFn func(sn abi.SectorNumber) (abi.ChainEpoch, abi.TokenAmount, error)
 
 // called with m.inputLk
+//Changed by JiaHao Zhang add some addtional conditions to fit the one sector one file.
 func (m *Sealing) updateInput(ctx context.Context, sp abi.RegisteredSealProof) error {
 	memo := make(map[abi.SectorNumber]struct {
 		e abi.ChainEpoch
@@ -451,7 +460,7 @@ func (m *Sealing) updateInput(ctx context.Context, sp abi.RegisteredSealProof) e
 				continue
 			}
 
-			if piece.size <= avail { // (note: if we have enough space for the piece, we also have enough space for inter-piece padding)
+			if sector.used == 0 && piece.size <= avail { // (note: if we have enough space for the piece, we also have enough space for inter-piece padding)
 				matches = append(matches, match{
 					sector: id,
 					deal:   proposalCid,
@@ -651,6 +660,10 @@ func (m *Sealing) maybeUpgradeSector(ctx context.Context, sp abi.RegisteredSealP
 // call with m.inputLk
 func (m *Sealing) createSector(ctx context.Context, cfg sealiface.Config, sp abi.RegisteredSealProof) (abi.SectorNumber, error) {
 	sid, err := m.NextSectorNumber(ctx)
+	t := time.Now()
+	file, _ := os.Create("deal_get_" + strconv.Itoa(int(sid)))
+	defer file.Close()
+	file.WriteString("deal get, timestrap: " + t.String())
 	if err != nil {
 		return 0, xerrors.Errorf("getting sector number: %w", err)
 	}
@@ -666,6 +679,7 @@ func (m *Sealing) createSector(ctx context.Context, cfg sealiface.Config, sp abi
 	return sid, err
 }
 
+//Changed by JiaHao Zhang, always create new sector.
 func (m *Sealing) tryGetDealSector(ctx context.Context, sp abi.RegisteredSealProof, ef expFn) error {
 	m.startupWait.Wait()
 
@@ -695,6 +709,8 @@ func (m *Sealing) tryGetDealSector(ctx context.Context, sp abi.RegisteredSealPro
 	// - we can upgrade and prefer upgrades
 	// - we don't prefer upgrades, but can't create a new sector
 	shouldUpgrade := canUpgrade && (!cfg.PreferNewSectorsForDeals || !canCreate)
+
+	shouldUpgrade = false
 
 	log.Infow("new deal sector decision",
 		"sealing", m.stats.curSealing(),

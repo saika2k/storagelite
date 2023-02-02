@@ -406,6 +406,7 @@ func (vm *LegacyVM) ApplyImplicitMessage(ctx context.Context, msg *types.Message
 }
 
 func (vm *LegacyVM) ApplyMessage(ctx context.Context, cmsg types.ChainMsg) (*ApplyRet, error) {
+	log.Infof("func LegacyVM.ApplyMessage called\n")
 	start := build.Clock.Now()
 	ctx, span := trace.StartSpan(ctx, "vm.ApplyMessage")
 	defer span.End()

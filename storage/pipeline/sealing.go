@@ -319,8 +319,9 @@ func (m *Sealing) Address() address.Address {
 }
 
 func getDealPerSectorLimit(size abi.SectorSize) (int, error) {
-	if size < 64<<30 {
+	/*if size < 64<<30 {
 		return 256, nil
 	}
-	return 512, nil
+	return 512, nil*/
+	return 1, nil
 }

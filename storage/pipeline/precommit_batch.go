@@ -281,7 +281,7 @@ func (b *PreCommitBatcher) processIndividually(cfg sealiface.Config) ([]sealifac
 }
 
 func (b *PreCommitBatcher) processSingle(cfg sealiface.Config, mi api.MinerInfo, avail *abi.TokenAmount, entry *preCommitEntry) (cid.Cid, error) {
-	msgParams := infoToPreCommitSectorParams(entry.pci)
+	msgParams := infoToPreCommitSectorParams_classic(entry.pci)
 	enc := new(bytes.Buffer)
 
 	if err := msgParams.MarshalCBOR(enc); err != nil {
@@ -329,7 +329,7 @@ func (b *PreCommitBatcher) processBatch(cfg sealiface.Config, tsk types.TipSetKe
 		}
 
 		res.Sectors = append(res.Sectors, p.pci.SectorNumber)
-		params.Sectors = append(params.Sectors, *infoToPreCommitSectorParams(p.pci))
+		params.Sectors = append(params.Sectors, *infoToPreCommitSectorParams_classic(p.pci))
 		deposit = big.Add(deposit, p.deposit)
 	}
 

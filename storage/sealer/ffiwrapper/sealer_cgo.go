@@ -7,9 +7,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
+
+	//"strconv"
+	"encoding/binary"
+
+	//"crypto/rand"
+	//"encoding/base64"
+	//"encoding/json"
+	"crypto/sha256"
 	"io"
 	"io/ioutil"
 	"math/bits"
@@ -20,6 +25,10 @@ import (
 
 	"github.com/detailyang/go-fallocate"
 	"github.com/ipfs/go-cid"
+
+	mc "github.com/multiformats/go-multicodec"
+	mh "github.com/multiformats/go-multihash"
+	varint "github.com/multiformats/go-varint"
 	"golang.org/x/xerrors"
 
 	ffi "github.com/filecoin-project/filecoin-ffi"
@@ -733,6 +742,10 @@ func (sb *Sealer) RegenerateSectorKey(ctx context.Context, sector storiface.Sect
 	return nil
 }
 
+//Changed by JiaHao Zhang Now the preCommit2 phase doing the following things:
+//copy the unsealed file of the sector into the sealed path; use the raw sector data as the pc1 output.
+//By checking the code in AddPiece, I found that lotus doesn't create the size-basis-temp-file for the sector,
+//just using the unsealed path to save the raw data.
 func (sb *Sealer) SealPreCommit1(ctx context.Context, sector storiface.SectorRef, ticket abi.SealRandomness, pieces []abi.PieceInfo) (out storiface.PreCommit1Out, err error) {
 	paths, done, err := sb.sectors.AcquireSector(ctx, sector, storiface.FTUnsealed, storiface.FTSealed|storiface.FTCache, storiface.PathSealing)
 	if err != nil {
@@ -764,7 +777,11 @@ func (sb *Sealer) SealPreCommit1(ctx context.Context, sector storiface.SectorRef
 		}
 	}
 
-	var sum abi.UnpaddedPieceSize
+	var sum abi.PaddedPieceSize
+	for _, piece := range pieces {
+		sum += piece.Size
+	}
+	/*var sum abi.UnpaddedPieceSize
 	for _, piece := range pieces {
 		sum += piece.Size.Unpadded()
 	}
@@ -775,10 +792,10 @@ func (sb *Sealer) SealPreCommit1(ctx context.Context, sector storiface.SectorRef
 	ussize := abi.PaddedPieceSize(ssize).Unpadded()
 	if sum != ussize {
 		return nil, xerrors.Errorf("aggregated piece sizes don't match sector size: %d != %d (%d)", sum, ussize, int64(ussize-sum))
-	}
+	}*/
 
 	// TODO: context cancellation respect
-	p1o, err := ffi.SealPreCommitPhase1(
+	/*p1o, err := ffi.SealPreCommitPhase1(
 		sector.ProofType,
 		paths.Cache,
 		paths.Unsealed,
@@ -790,20 +807,48 @@ func (sb *Sealer) SealPreCommit1(ctx context.Context, sector storiface.SectorRef
 	)
 	if err != nil {
 		return nil, xerrors.Errorf("presealing sector %d (%s): %w", sector.ID.Number, paths.Unsealed, err)
+	}*/
+
+	err = storiface.CopyFile(paths.Unsealed, paths.Sealed) //copy the temp sector file into the seal sector file path
+	if err != nil {
+		return nil, err
 	}
 
-	p1odec := map[string]interface{}{}
+	p1o, err := storiface.ReadFile(paths.Unsealed, uint64(sum))
+
+	log.Infof("read the unsealed file, size=%v, pieces size=%v\n", len(p1o), sum)
+
+	filename := "sector" + sector.ID.Number.String()
+	_, err = os.Stat(filename)
+	if err != nil {
+		file, err := os.Create(filename)
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+		datasize := int32(sum)
+		buffer1 := bytes.NewBuffer([]byte{})
+		binary.Write(buffer1, binary.BigEndian, datasize)
+		ds_B := buffer1.Bytes()
+
+		file.Write(ds_B)
+	}
+
+	/*p1odec := map[string]interface{}{}
 	if err := json.Unmarshal(p1o, &p1odec); err != nil {
 		return nil, xerrors.Errorf("unmarshaling pc1 output: %w", err)
 	}
 
 	p1odec["_lotus_SealRandomness"] = ticket
 
-	return json.Marshal(&p1odec)
+	return json.Marshal(&p1odec)*/
+	return p1o, nil
 }
 
 var PC2CheckRounds = 3
 
+//Changed by JiaHao Zhang Now the preCommit2 phase generate the cids just using Merkle tree
+//we no longer use the ffi.
 func (sb *Sealer) SealPreCommit2(ctx context.Context, sector storiface.SectorRef, phase1Out storiface.PreCommit1Out) (storiface.SectorCids, error) {
 	paths, done, err := sb.sectors.AcquireSector(ctx, sector, storiface.FTSealed|storiface.FTCache, 0, storiface.PathSealing)
 	if err != nil {
@@ -811,12 +856,20 @@ func (sb *Sealer) SealPreCommit2(ctx context.Context, sector storiface.SectorRef
 	}
 	defer done()
 
-	sealedCID, unsealedCID, err := ffi.SealPreCommitPhase2(phase1Out, paths.Cache, paths.Sealed)
+	/*sealedCID, unsealedCID, err := ffi.SealPreCommitPhase2(phase1Out, paths.Cache, paths.Sealed)
+	if err != nil {
+		return storiface.SectorCids{}, xerrors.Errorf("presealing sector %d (%s): %w", sector.ID.Number, paths.Unsealed, err)
+	}*/
+
+	log.Infof("Start generate Merkle tree and cids")
+
+	sealedCID, unsealedCID, err := Gen_Merkle(phase1Out)
+
 	if err != nil {
 		return storiface.SectorCids{}, xerrors.Errorf("presealing sector %d (%s): %w", sector.ID.Number, paths.Unsealed, err)
 	}
 
-	ssize, err := sector.ProofType.SectorSize()
+	/*ssize, err := sector.ProofType.SectorSize()
 	if err != nil {
 		return storiface.SectorCids{}, xerrors.Errorf("get ssize: %w", err)
 	}
@@ -858,12 +911,115 @@ func (sb *Sealer) SealPreCommit2(ctx context.Context, sector storiface.SectorRef
 				return storiface.SectorCids{}, xerrors.Errorf("checking PreCommit failed: %w", err)
 			}
 		}
-	}
+	}*/
+
+	log.Infof("In func precommit2: create CIDs: %v, %v, expected equal\n", unsealedCID, sealedCID)
 
 	return storiface.SectorCids{
 		Unsealed: unsealedCID,
 		Sealed:   sealedCID,
 	}, nil
+}
+
+type Node struct {
+	value []byte
+}
+
+//This part is added by JiaHao Zhang, create a Merkle tree and get the root.
+//use XOR to avoid the position difference of the Merkle tree
+//At last, create a CID for the root.
+func Gen_Merkle(phase1Out []byte) (cid.Cid, cid.Cid, error) {
+	var leafs []*Node
+
+	reader := bytes.NewReader(phase1Out)
+
+	log.Infof("In Gen Merkle, start reading pc1o...")
+
+	help_count := 1
+
+	for {
+		buf := make([]byte, 32)
+		n, err := reader.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return cid.Undef, cid.Undef, err
+			}
+		}
+		file_data := buf[:n]
+		leafs = append(leafs, &Node{value: file_data})
+		//log.Infof("reading leaf[%v] success!\n", help_count)
+		help_count = help_count + 1
+	}
+
+	for len(leafs) > 1 {
+		//log.Infof("Merkle leaf length in cycle:%v\n", len(leafs))
+		tmp := []*Node{}
+		for len(leafs) >= 1 {
+			//log.Infof("Check length:%v\n", len(leafs))
+			value0 := leafs[0]
+			leafs = leafs[1:]
+			if len(leafs) > 0 {
+				//log.Infof("pairing:%v\n", len(leafs))
+				value1 := leafs[0]
+				leafs = leafs[1:]
+				//log.Infof("start two leaf value XOR:%v\n", len(leafs))
+				rawdata := XOR(value0.value, value1.value)
+				//log.Infof("start hashing rawdata:%v\n", len(leafs))
+				hash := sha256.Sum256(rawdata)
+				//log.Infof("start saving new temp nodes:%v\n", len(leafs))
+				tmp = append(tmp, &Node{value: hash[:]})
+			} else {
+				//log.Infof("no pairing:%v\n", len(leafs))
+				tmp = append(tmp, value0)
+			}
+		}
+		leafs = tmp
+	}
+
+	root := leafs[0].value
+	//mulhash := mh.Multihash(root)
+	// TODO: ERROR IN THIS FUNCTION, HOW TO CHANGE A []byte TO CID??????
+	//log.Infof("length of the Merkle Root:%v\n", len(root))
+	//CID := cid.NewCidV0(root)
+	/*if err != nil {
+		return cid.Undef, cid.Undef, err
+	}*/
+	/*pref := cid.Prefix{
+		Version:  1,
+		Codec:    uint64(mc.FilCommitmentSealed),
+		MhType:   mh.POSEIDON_BLS12_381_A1_FC1,
+		MhLength: -1,
+	}
+	CID, err := pref.Sum(root)*/
+
+	MhType := mh.POSEIDON_BLS12_381_A1_FC1
+
+	mhBuf := make(
+		[]byte,
+		(varint.UvarintSize(uint64(MhType)) + varint.UvarintSize(uint64(len(root))) + len(root)),
+	)
+
+	pos := varint.PutUvarint(mhBuf, uint64(MhType))
+	pos += varint.PutUvarint(mhBuf[pos:], uint64(len(root)))
+	copy(mhBuf[pos:], root)
+
+	CID := cid.NewCidV1(uint64(mc.FilCommitmentSealed), mh.Multihash(mhBuf))
+
+	return CID, CID, nil
+}
+
+func XOR(value0, value1 []byte) []byte {
+	length := len(value0)
+	result := make([]byte, length)
+	for i := 0; i < length; i++ {
+		i0 := uint8(value0[i])
+		i1 := uint8(value1[i])
+		tmp := i0 ^ i1
+		result[i] = byte(tmp)
+	}
+	return result
 }
 
 func (sb *Sealer) SealCommit1(ctx context.Context, sector storiface.SectorRef, ticket abi.SealRandomness, seed abi.InteractiveSealRandomness, pieces []abi.PieceInfo, cids storiface.SectorCids) (storiface.Commit1Out, error) {
@@ -1068,22 +1224,23 @@ func (sb *Sealer) freeUnsealed(ctx context.Context, sector storiface.SectorRef, 
 }
 
 func (sb *Sealer) FinalizeSector(ctx context.Context, sector storiface.SectorRef, keepUnsealed []storiface.Range) error {
-	ssize, err := sector.ProofType.SectorSize()
+	_, err := sector.ProofType.SectorSize()
 	if err != nil {
 		return err
 	}
 
-	if err := sb.freeUnsealed(ctx, sector, keepUnsealed); err != nil {
+	/*if err := sb.freeUnsealed(ctx, sector, keepUnsealed); err != nil {
 		return err
-	}
+	}*/
 
-	paths, done, err := sb.sectors.AcquireSector(ctx, sector, storiface.FTCache, 0, storiface.PathStorage)
+	_, done, err := sb.sectors.AcquireSector(ctx, sector, storiface.FTCache, 0, storiface.PathStorage)
 	if err != nil {
 		return xerrors.Errorf("acquiring sector cache path: %w", err)
 	}
 	defer done()
 
-	return ffi.ClearCache(uint64(ssize), paths.Cache)
+	//return ffi.ClearCache(uint64(ssize), paths.Cache)
+	return nil
 }
 
 // FinalizeSectorInto is like FinalizeSector, but writes finalized sector cache into a new path

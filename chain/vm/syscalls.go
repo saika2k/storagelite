@@ -258,7 +258,7 @@ func (ss *syscallShim) VerifyPoSt(info proof7.WindowPoStVerifyInfo) error {
 func (ss *syscallShim) VerifySeal(info proof7.SealVerifyInfo) error {
 	//_, span := trace.StartSpan(ctx, "ValidatePoRep")
 	//defer span.End()
-
+	log.Infof("syscall.VerifySeal called, target sector:num:%v\n", info.Number)
 	miner, err := address.NewIDAddress(uint64(info.Miner))
 	if err != nil {
 		return xerrors.Errorf("weirdly failed to construct address: %w", err)
@@ -271,7 +271,10 @@ func (ss *syscallShim) VerifySeal(info proof7.SealVerifyInfo) error {
 	log.Debugf("Verif r:%s; d:%s; m:%s; t:%x; s:%x; N:%d; p:%x", info.SealedCID, info.UnsealedCID, miner, ticket, seed, info.SectorID.Number, proof)
 
 	//func(ctx context.Context, maddr address.Address, ssize abi.SectorSize, commD, commR, ticket, proof, seed []byte, sectorID abi.SectorNumber)
-	ok, err := ss.verifier.VerifySeal(info)
+	//ok, err := ss.verifier.VerifySeal(info)
+	log.Info("we never verify the seal proof as the form of it is different from filecoin.")
+	ok := true
+	err = nil
 	if err != nil {
 		return xerrors.Errorf("failed to validate PoRep: %w", err)
 	}

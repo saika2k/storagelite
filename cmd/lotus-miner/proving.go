@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	//"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -634,16 +634,16 @@ It will not send any messages to the chain.`,
 		ctx := lcli.ReqContext(cctx)
 
 		start := time.Now()
-		res, err := minerApi.ComputeWindowPoSt(ctx, dlIdx, types.EmptyTSK)
+		_, err = minerApi.ComputeWindowPoSt(ctx, dlIdx, types.EmptyTSK)
 		fmt.Printf("Took %s\n", time.Now().Sub(start))
 		if err != nil {
 			return err
 		}
-		jr, err := json.Marshal(res)
+		/*jr, err := json.Marshal(res)
 		if err != nil {
 			return err
 		}
-		fmt.Println(string(jr))
+		fmt.Println(string(jr))*/
 
 		return nil
 	},

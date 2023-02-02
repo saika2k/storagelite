@@ -181,6 +181,7 @@ func (t *TipSetExecutor) ApplyBlocks(ctx context.Context,
 			if _, found := processedMsgs[m.Cid()]; found {
 				continue
 			}
+			log.Infof("message to be applied: From:%v->To:%v,Method:%v\n", m.From, m.To, m.Method)
 			r, err := vmi.ApplyMessage(ctx, cm)
 			if err != nil {
 				return cid.Undef, cid.Undef, err
@@ -192,6 +193,7 @@ func (t *TipSetExecutor) ApplyBlocks(ctx context.Context,
 
 			if em != nil {
 				if err := em.MessageApplied(ctx, ts, cm.Cid(), m, r, false); err != nil {
+					log.Infof("message not applied: From:%v->To:%v,Method:%v\n", m.From, m.To, m.Method)
 					return cid.Undef, cid.Undef, err
 				}
 			}
@@ -307,7 +309,15 @@ func (t *TipSetExecutor) ExecuteTipSet(ctx context.Context,
 	for i := range fbmsgs {
 		fbmsgs[i].BlockMessages = blkmsgs[i]
 		fbmsgs[i].WinCount = ts.Blocks()[i].ElectionProof.WinCount
+		log.Infof("getting message in tipset, height:%v, message from:%v\n", ts.Height(), fbmsgs[i].Miner)
+		for j := 0; j < len(fbmsgs[i].BlsMessages); j = j + 1 {
+			log.Infof("\tgetting bls message cid:%v\n", fbmsgs[i].BlsMessages[j].Cid())
+		}
+		for k := 0; k < len(fbmsgs[i].SecpkMessages); k = k + 1 {
+			log.Infof("\tgetting secpk message cid:%v\n", fbmsgs[i].SecpkMessages[k].Cid())
+		}
 	}
+
 	baseFee := blks[0].ParentBaseFee
 
 	return t.ApplyBlocks(ctx, sm, parentEpoch, pstate, fbmsgs, blks[0].Height, r, em, vmTracing, baseFee, ts)

@@ -3,6 +3,11 @@ package wdpost
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"io/ioutil"
+	"math"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -22,6 +27,7 @@ import (
 	proof7 "github.com/filecoin-project/specs-actors/v7/actors/runtime/proof"
 
 	"github.com/filecoin-project/lotus/api"
+	lapi "github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/actors"
 	"github.com/filecoin-project/lotus/chain/actors/policy"
@@ -697,8 +703,12 @@ func (s *WindowPoStScheduler) prepareMessage(ctx context.Context, msg *types.Mes
 	return nil
 }
 
+//Modified by JiaHao Zhang. This function is used by the compute PoSt api which will give the time elapse of a Window PoSt
+//generation. Now, the dlInx is the sector number, we just create a randomness and generate a Window PoSt for a single sector.
+//The Window PoSt algorithm is also modified: we use a muitl-round PoS as the PoSt to make it the same as the filecoin.
+//Also, we will create a message to the aggregator.(TO BE IMPL)
 func (s *WindowPoStScheduler) ComputePoSt(ctx context.Context, dlIdx uint64, ts *types.TipSet) ([]miner.SubmitWindowedPoStParams, error) {
-	dl, err := s.api.StateMinerProvingDeadline(ctx, s.actor, ts.Key())
+	/*dl, err := s.api.StateMinerProvingDeadline(ctx, s.actor, ts.Key())
 	if err != nil {
 		return nil, xerrors.Errorf("getting deadline: %w", err)
 	}
@@ -715,9 +725,208 @@ func (s *WindowPoStScheduler) ComputePoSt(ctx context.Context, dlIdx uint64, ts 
 	// runPoStCycle only needs dl.Index and dl.Challenge
 	dl.Challenge += epochDiff
 
-	return s.runPoStCycle(ctx, true, *dl, ts)
+	return s.runPoStCycle(ctx, true, *dl, ts)*/
+	dl, err := s.api.StateMinerProvingDeadline(ctx, s.actor, ts.Key())
+	if err != nil {
+		return nil, xerrors.Errorf("getting deadline: %w", err)
+	}
+	//r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	curIdx := 0
+	/*dl.Index = dlIdx
+	dlDiff := dl.Index - curIdx
+	if dl.Index > curIdx {
+		dlDiff -= dl.WPoStPeriodDeadlines
+		dl.PeriodStart -= dl.WPoStProvingPeriod
+	}*/
+
+	epochDiff := (dl.WPoStProvingPeriod / abi.ChainEpoch(dl.WPoStPeriodDeadlines)) * abi.ChainEpoch(curIdx)
+
+	// runPoStCycle only needs dl.Index and dl.Challenge
+	dl.Challenge += epochDiff
+
+	post := make([]miner.SubmitWindowedPoStParams, 0, 1)
+	//ctx, span := trace.StartSpan(ctx, "storage.runPoStCycle")
+	//defer span.End()
+
+	buf := new(bytes.Buffer)
+	if err := s.actor.MarshalCBOR(buf); err != nil {
+		return nil, xerrors.Errorf("failed to marshal address to cbor: %w", err)
+	}
+
+	headTs, err := s.api.ChainHead(ctx)
+	if err != nil {
+		return nil, xerrors.Errorf("getting current head: %w", err)
+	}
+	rand, err := s.api.StateGetRandomnessFromBeacon(ctx, crypto.DomainSeparationTag_WindowedPoStChallengeSeed, dl.Challenge, buf.Bytes(), headTs.Key())
+	//rand, err := s.api.StateGetRandomnessFromBeacon(ctx, crypto.DomainSeparationTag_WindowedPoStChallengeSeed, dl.Challenge, buf.Bytes(), headTs.Key())
+	if err != nil {
+		return nil, xerrors.Errorf("failed to get chain randomness from beacon for window post (ts=%d; deadline=%d): %w", ts.Height(), dl, err)
+	}
+	//log.Info("miner address: ", s.actor.String())
+	//sectorPerCommitInfo, _ := s.api.StateSectorPreCommitInfo(ctx, s.actor, abi.SectorNumber(dlIdx), headTs.Key())
+
+	//log.Info("get precommit info for sector ", sectorPerCommitInfo.Info.SectorNumber, "piece commP: ", sectorPerCommitInfo.Info.UnsealedCid.String())
+
+	var xsinfos []proof.SectorInfo
+
+	/*sinfo := proof.SectorInfo{
+		SealProof:    sectorPerCommitInfo.Info.SealProof,
+		SectorNumber: sectorPerCommitInfo.Info.SectorNumber,
+		SealedCID:    sectorPerCommitInfo.Info.SealedCID,
+	}*/
+
+	filename := "sector" + strconv.FormatUint(uint64(dlIdx), 10) + "pre"
+
+	f, _ := os.Open(filename)
+	data, _ := ioutil.ReadAll(f)
+
+	defer f.Close()
+
+	var sealprooftype int32
+	pointer := 0
+	pt_B := data[pointer : pointer+4]
+	dec_buffer1 := bytes.NewBuffer(pt_B)
+	binary.Read(dec_buffer1, binary.BigEndian, &sealprooftype)
+	pointer = pointer + 4
+
+	var sectornum int32
+	num_B := data[pointer : pointer+4]
+	dec_buffer2 := bytes.NewBuffer(num_B)
+	binary.Read(dec_buffer2, binary.BigEndian, &sectornum)
+	pointer = pointer + 4
+
+	var lengt int32
+	len_CID := data[pointer : pointer+4]
+	dec_buffer3 := bytes.NewBuffer(len_CID)
+	binary.Read(dec_buffer3, binary.BigEndian, &lengt)
+	pointer = pointer + 4
+
+	dec_CID := data[pointer : pointer+int(lengt)]
+	sealedCID, _ := cid.Cast(dec_CID)
+	pointer = pointer + int(lengt)
+
+	len_UCID := data[pointer : pointer+4]
+	dec_buffer4 := bytes.NewBuffer(len_UCID)
+	binary.Read(dec_buffer4, binary.BigEndian, &lengt)
+	pointer = pointer + 4
+
+	dec_UCID := data[pointer : pointer+int(lengt)]
+	unsealedCID, _ := cid.Cast(dec_UCID)
+	//pointer = pointer + int(lengt)
+
+	sinfo := proof.SectorInfo{
+		SealProof:    abi.RegisteredSealProof(sealprooftype),
+		SectorNumber: abi.SectorNumber(sectornum),
+		SealedCID:    sealedCID,
+	}
+
+	log.Info("get sector messages: prooftype: ", sealprooftype, " sectornumber: ", sectornum, " CID: ", sealedCID.String(), " pieceCID: ", unsealedCID.String())
+	xsinfos = append(xsinfos, sinfo)
+
+	mid, err := address.IDFromAddress(s.actor)
+	if err != nil {
+		return nil, err
+	}
+
+	var Data = []float64{}
+	for i := 0; i < 100; i++ {
+		start := time.Now()
+		_, _, _ = s.prover.GenerateWindowPoSt2(ctx, abi.ActorID(mid), xsinfos, append(abi.PoStRandomness{}, rand...))
+		elapsed := time.Since(start).Seconds()
+		Data = append(Data, elapsed)
+	}
+	Mean := mean(Data)
+	Std := std(Data)
+	Fil, _ := os.Create("sto_PoSt_time" + strconv.Itoa((int(dlIdx))))
+	defer f.Close()
+	Fil.WriteString("mean: " + strconv.FormatFloat(Mean, 'f', -1, 32))
+	Fil.WriteString("std: " + strconv.FormatFloat(Std, 'f', -1, 32))
+
+	postOut, _, err := s.prover.GenerateWindowPoSt2(ctx, abi.ActorID(mid), xsinfos, append(abi.PoStRandomness{}, rand...))
+
+	if err != nil {
+		return nil, err
+	}
+
+	buffer1 := bytes.NewBuffer([]byte{})
+	buffer2 := bytes.NewBuffer([]byte{})
+
+	postproof := postOut[0].ProofBytes
+	len_proof := len(postproof)
+	pieceCID := unsealedCID.Bytes()
+	len_pcid := len(pieceCID)
+
+	binary.Write(buffer1, binary.BigEndian, int32(len_proof))
+	len_proof_B := buffer1.Bytes()
+
+	binary.Write(buffer2, binary.BigEndian, int32(len_pcid))
+	len_pcid_B := buffer2.Bytes()
+
+	var msgparam []byte
+
+	msgparam = append(msgparam, len_proof_B...)
+	msgparam = append(msgparam, postproof...)
+	msgparam = append(msgparam, len_pcid_B...)
+	msgparam = append(msgparam, pieceCID...)
+
+	mi, err := s.api.StateMinerInfo(ctx, s.actor, types.EmptyTSK)
+	if err != nil {
+		panic(err)
+	}
+
+	msg := &types.Message{
+		From:   mi.Worker,
+		To:     s.actor,
+		Method: 0,
+		Params: msgparam,
+		Value:  types.NewInt(233),
+	}
+
+	maxFee := types.MustParseFIL("0.05")
+
+	_, err = s.api.MpoolPushMessage(ctx, msg, &lapi.MessageSendSpec{MaxFee: big.Int(maxFee)})
+	if err != nil {
+		panic(err)
+	}
+
+	t := time.Now()
+	file, _ := os.Create("aggr_start_" + t.String())
+	defer file.Close()
+	file.WriteString("aggr start, timestrap: " + t.String() + "\n" + "pieceCID: " + string(pieceCID))
+
+	params := miner.SubmitWindowedPoStParams{
+		Deadline:   dl.Index,
+		Partitions: nil,
+		Proofs:     postOut,
+	}
+
+	post = append(post, params)
+
+	return post, nil
 }
 
 func (s *WindowPoStScheduler) ManualFaultRecovery(ctx context.Context, maddr address.Address, sectors []abi.SectorNumber) ([]cid.Cid, error) {
 	return s.declareManualRecoveries(ctx, maddr, sectors, types.TipSetKey{})
+}
+
+func mean(v []float64) float64 {
+	var res float64 = 0
+	var n int = len(v)
+	for i := 0; i < n; i++ {
+		res += v[i]
+	}
+	return res / float64(n)
+}
+
+func variance(v []float64) float64 {
+	var res float64 = 0
+	var m = mean(v)
+	var n int = len(v)
+	for i := 0; i < n; i++ {
+		res += (v[i] - m) * (v[i] - m)
+	}
+	return res / float64(n-1)
+}
+func std(v []float64) float64 {
+	return math.Sqrt(variance(v))
 }
