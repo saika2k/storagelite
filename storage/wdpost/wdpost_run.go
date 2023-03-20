@@ -827,8 +827,8 @@ func (s *WindowPoStScheduler) ComputePoSt(ctx context.Context, dlIdx uint64, ts 
 	if err != nil {
 		return nil, err
 	}
-
-	var Data = []float64{}
+	//start test code
+	/*var Data = []float64{}
 	for i := 0; i < 100; i++ {
 		start := time.Now()
 		_, _, _ = s.prover.GenerateWindowPoSt2(ctx, abi.ActorID(mid), xsinfos, append(abi.PoStRandomness{}, rand...))
@@ -840,7 +840,8 @@ func (s *WindowPoStScheduler) ComputePoSt(ctx context.Context, dlIdx uint64, ts 
 	Fil, _ := os.Create("sto_PoSt_time" + strconv.Itoa((int(dlIdx))))
 	defer f.Close()
 	Fil.WriteString("mean: " + strconv.FormatFloat(Mean, 'f', -1, 32))
-	Fil.WriteString("std: " + strconv.FormatFloat(Std, 'f', -1, 32))
+	Fil.WriteString("std: " + strconv.FormatFloat(Std, 'f', -1, 32))*/
+	//end test code
 
 	postOut, _, err := s.prover.GenerateWindowPoSt2(ctx, abi.ActorID(mid), xsinfos, append(abi.PoStRandomness{}, rand...))
 

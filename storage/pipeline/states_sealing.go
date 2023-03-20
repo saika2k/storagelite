@@ -5,6 +5,8 @@ import (
 	"context"
 	"math"
 
+	//"time"
+
 	//"encoding/json"
 	"encoding/binary"
 	"io"
@@ -780,10 +782,14 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 	if err != nil {
 		return ctx.Send(SectorSealPreCommit1Failed{xerrors.Errorf("seal pre commit(1) failed: %w", err)})
 	}
+
+	//start test code
 	/*var data = []float64{}
 	for i := 0; i < 5; i++ {
 		start := time.Now()
-		_ = PoS_Generation(pc1o, sector.SeedValue, *sector.CommR)
+		for i := 1; i <= 10; i++ {
+			_ = PoS_Generation(pc1o, sector.SeedValue, *sector.CommR)
+		}
 		elapsed := time.Since(start).Seconds()
 		data = append(data, elapsed)
 	}
@@ -793,8 +799,12 @@ func (m *Sealing) handleCommitting(ctx statemachine.Context, sector SectorInfo) 
 	defer f.Close()
 	f.WriteString("mean: " + strconv.FormatFloat(Mean, 'f', -1, 32))
 	f.WriteString("std: " + strconv.FormatFloat(Std, 'f', -1, 32))*/
+	//end test code
 
-	porepProof = PoS_Generation(pc1o, sector.SeedValue, *sector.CommR)
+	for i := 1; i <= 10; i++ {
+		porepProof = PoS_Generation(pc1o, sector.SeedValue, *sector.CommR) //debug: 2023/3/13: temprary changed for the proper PoS generation time. We need multi-round to prevent attack.
+	}
+	//porepProof = PoS_Generation(pc1o, sector.SeedValue, *sector.CommR)
 
 	/*if len(porepProof) > 192 {
 		porepProof = porepProof[:192]

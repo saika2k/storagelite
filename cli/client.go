@@ -556,9 +556,10 @@ The minimum value is 518400 (6 months).`,
 
 		afmt.Println(encoder.Encode(*proposal))
 		//send extra message for increment file
+		aggr, _ := address.NewFromString("t01000")
 		if Isinc {
 			maxFee := types.MustParseFIL("0.05")
-			msg, err := CreateExtraIncMessage(ctx, api, miner, miner, cur_commP, orif, ver)
+			msg, err := CreateExtraIncMessage(ctx, api, miner, aggr, cur_commP, orif, ver)
 			if err != nil {
 				return xerrors.Errorf("failed to create increment message: %w", err)
 			}

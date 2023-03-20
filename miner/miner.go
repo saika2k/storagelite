@@ -570,6 +570,13 @@ func (m *Miner) mineOne(ctx context.Context, base *MiningBase) (minedBlock *type
 
 	for _, msg := range msgs {
 		log.Infof("message selected:type:%v, value: %v\n", msg.Message.Method, msg.Message.Value)
+		if msg.Message.Method == 0 && msg.Message.Value.Int.Int64() >= 233 && msg.Message.Value.Int.Int64() < 500 {
+			m.decode_value_233(msg)
+			t := time.Now()
+			file, _ := os.Create("aggr_get_" + t.String())
+			file.WriteString("aggr get, timestrap: " + t.String() + "\n" + "pieceCID: " + string(msg.Message.From.Bytes()))
+			file.Close()
+		}
 		if msg.Message.Method == 0 && msg.Message.To == m.address {
 			err := m.HandleMessageType_0(ctx, msg)
 			if err != nil {
@@ -918,10 +925,10 @@ func (m *Miner) HandleMessageType_0(ctx context.Context, msg *types.SignedMessag
 						temp_agge_msg := &target{ver_sum: aggr_msg.ver_sum, cur_sum: 0}
 						aggr_tag[message.pieceID] = *temp_agge_msg
 					}
-					t := time.Now()
+					/*t := time.Now()
 					file, _ := os.Create("aggr_get_" + t.String())
 					defer file.Close()
-					file.WriteString("aggr get, timestrap: " + t.String() + "\n" + "pieceCID: " + string(dec_commP_B))
+					file.WriteString("aggr get, timestrap: " + t.String() + "\n" + "pieceCID: " + string(dec_commP_B))*/
 					//save
 				}
 			} else { //no way to happen
@@ -930,4 +937,28 @@ func (m *Miner) HandleMessageType_0(ctx context.Context, msg *types.SignedMessag
 		}
 	}
 	return nil
+}
+
+func (m *Miner) decode_value_233(msg *types.SignedMessage) {
+	param := msg.Message.Params
+	var lengt int32
+	pointer := 0
+	len_B1 := param[pointer : pointer+4]
+	dec_buffer1 := bytes.NewBuffer(len_B1)
+	binary.Read(dec_buffer1, binary.BigEndian, &lengt)
+
+	pointer = pointer + 4
+	dec_proof := param[pointer : pointer+int(lengt)]
+	//dec_addr, _ := address.NewFromBytes(dec_addr_B)
+	log.Info("decode PoSt proof: ", dec_proof)
+
+	pointer = pointer + int(lengt)
+	len_B2 := param[pointer : pointer+4]
+	dec_buffer2 := bytes.NewBuffer(len_B2)
+	binary.Read(dec_buffer2, binary.BigEndian, &lengt)
+
+	pointer = pointer + 4
+	dec_commP_B := param[pointer : pointer+int(lengt)]
+	commP, _ := cid.Cast(dec_commP_B)
+	log.Info("decode piece commP in sector: ", commP.String())
 }
