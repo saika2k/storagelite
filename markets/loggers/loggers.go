@@ -3,6 +3,9 @@ package marketevents
 import (
 	logging "github.com/ipfs/go-log/v2"
 
+	"os"
+	"time"
+
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-fil-markets/retrievalmarket"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
@@ -13,6 +16,12 @@ var log = logging.Logger("markets")
 
 // StorageClientLogger logs events from the storage client
 func StorageClientLogger(event storagemarket.ClientEvent, deal storagemarket.ClientDeal) {
+	if event == 0 {
+		filepath := "message_on_chain" + time.Now().String()
+		f, _ := os.Create(filepath)
+		f.WriteString(time.Now().String())
+		f.Close()
+	}
 	log.Infow("storage client event", "name", storagemarket.ClientEvents[event], "proposal CID", deal.ProposalCid, "state", storagemarket.DealStates[deal.State], "message", deal.Message)
 }
 

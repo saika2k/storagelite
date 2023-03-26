@@ -544,7 +544,6 @@ The minimum value is 518400 (6 months).`,
 		} else {
 			proposal, err = api.ClientStartDeal(ctx, sdParams)
 		}
-
 		if err != nil {
 			return err
 		}
