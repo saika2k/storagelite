@@ -5,7 +5,7 @@ import (
 	"context"
 	"math"
 
-	//"time"
+	"time"
 
 	//"encoding/json"
 	"encoding/binary"
@@ -1133,6 +1133,10 @@ func (m *Sealing) handleCommitWait(ctx statemachine.Context, sector SectorInfo) 
 	if si == nil {
 		return ctx.Send(SectorCommitFailed{xerrors.Errorf("proof validation failed, sector not found in sector set after cron")})
 	}*/
+	filepath := "deal_complete" + time.Now().String()
+	f, _ := os.Create(filepath)
+	f.WriteString(mw.Height.String())
+	f.Close()
 	log.Infof("sector message: SAVEINC:=%s\n", sector.LastErr)
 
 	return ctx.Send(SectorProving{})

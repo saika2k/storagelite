@@ -36,6 +36,8 @@ import (
 	"github.com/filecoin-project/lotus/metrics"
 )
 
+var total_message = 0
+
 func NewActorRegistry() *vm.ActorRegistry {
 	inv := vm.NewActorRegistry()
 
@@ -309,16 +311,17 @@ func (t *TipSetExecutor) ExecuteTipSet(ctx context.Context,
 	for i := range fbmsgs {
 		fbmsgs[i].BlockMessages = blkmsgs[i]
 		fbmsgs[i].WinCount = ts.Blocks()[i].ElectionProof.WinCount
-		log.Infof("getting message in tipset, height:%v, message from:%v\n", ts.Height(), fbmsgs[i].Miner)
+		total_message = total_message + 1
 		for j := 0; j < len(fbmsgs[i].BlsMessages); j = j + 1 {
-			log.Infof("\tgetting bls message cid:%v\n", fbmsgs[i].BlsMessages[j].Cid())
+			total_message = total_message + 1
 		}
 		for k := 0; k < len(fbmsgs[i].SecpkMessages); k = k + 1 {
-			log.Infof("\tgetting secpk message cid:%v\n", fbmsgs[i].SecpkMessages[k].Cid())
+			total_message = total_message + 1
 		}
 	}
-
 	baseFee := blks[0].ParentBaseFee
+
+	log.Infof("chain height:%v, total message:%v\n", blks[0].Height, total_message)
 
 	return t.ApplyBlocks(ctx, sm, parentEpoch, pstate, fbmsgs, blks[0].Height, r, em, vmTracing, baseFee, ts)
 }
