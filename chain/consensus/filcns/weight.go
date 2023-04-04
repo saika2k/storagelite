@@ -54,7 +54,8 @@ func Weight(ctx context.Context, stateBs bstore.Blockstore, ts *types.TipSet) (t
 
 		tpow = claim.QualityAdjPower // TODO: REVIEW: Is this correct?
 	}
-
+	log.Infof("get power in net: %v\n", tpow.Int64())
+	tpow = big2.NewInt(167772160)
 	log2P := int64(0)
 	if tpow.GreaterThan(zero) {
 		log2P = int64(tpow.BitLen() - 1)
