@@ -134,8 +134,8 @@ func (sb *Sealer) GenerateWindowPoSt(ctx context.Context, minerID abi.ActorID, s
 		return nil, skipped, xerrors.Errorf("pubSectorToPriv skipped some sectors")
 	}
 
-	//proof, faulty, err := ffi.GenerateWindowPoSt(minerID, privsectors, randomness)
-	proof, faulty, err := sb.GenWindowPoSt(ctx, minerID, privsectors, randomness)
+	proof, faulty, err := ffi.GenerateWindowPoSt(minerID, privsectors, randomness)
+	//proof, faulty, err := sb.GenWindowPoSt(ctx, minerID, privsectors, randomness)
 
 	var faultyIDs []abi.SectorID
 	for _, f := range faulty {
